@@ -1,0 +1,112 @@
+/*
+    MainComponent - the one window.
+
+    Left: the PDFs dropped on it, each with how it went (checked, needs a
+    look, not converted). Right: the chosen PDF's page as printed, with every
+    bar that needs a look outlined in red, the list of what to look at under
+    it, and the buttons: save the MusicXML, show it in the Finder, open it in
+    Noterator. Converting happens off the main thread, two files at a time.
+*/
+
+#pragma once
+
+#include "Convert.h"
+
+#include <juce_gui_extra/juce_gui_extra.h>
+
+#include <atomic>
+#include <map>
+#include <memory>
+
+namespace ans
+{
+
+struct Job
+{
+    juce::File pdf;
+    std::atomic<bool> done { false };
+    Conversion result;
+    juce::File saved;          // where its MusicXML was saved, once it is
+    int pages = 0;
+};
+
+class PagePreview : public juce::Component
+{
+public:
+    void show (Job* job, int page, int selectedIssue);
+    void paint (juce::Graphics&) override;
+    void resized() override { image = {}; }
+    void mouseUp (const juce::MouseEvent&) override;
+    std::function<void (int issue)> onIssueClicked;
+    int preferredHeight (int width) const;
+
+private:
+    Job* job = nullptr;
+    int page = 0, selected = -1;
+    juce::Image image;
+    double scale = 1.0;
+    void render();
+};
+
+class MainComponent : public juce::Component,
+                      public juce::FileDragAndDropTarget,
+                      private juce::ListBoxModel
+{
+public:
+    MainComponent();
+    ~MainComponent() override;
+
+    void addFiles (const juce::StringArray& paths);
+
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    bool isInterestedInFileDrag (const juce::StringArray&) override;
+    void filesDropped (const juce::StringArray&, int, int) override;
+    void fileDragEnter (const juce::StringArray&, int, int) override { dragging = true; repaint(); }
+    void fileDragExit (const juce::StringArray&) override { dragging = false; repaint(); }
+
+    // For checking the window without a mouse: wait for every file, then
+    // draw the window into a PNG.
+    bool allDone() const;
+    void selectFile (int index);
+
+private:
+    juce::OwnedArray<Job> jobs;
+    juce::ThreadPool pool { 2 };
+    int current = -1, currentPage = 0, currentIssue = -1;
+    bool dragging = false;
+
+    juce::TextButton openButton { ui ("Open\xe2\x80\xa6") }, saveButton { ui ("Save MusicXML\xe2\x80\xa6") },
+                     saveAllButton { "Save All" }, revealButton { "Show in Finder" }, noteratorButton { "Open in Noterator" },
+                     prevPage { ui ("\xe2\x80\xb9") }, nextPage { ui ("\xe2\x80\xba") };
+    juce::ListBox fileList { "Files", this };
+
+    struct IssueModel : juce::ListBoxModel
+    {
+        MainComponent& owner;
+        explicit IssueModel (MainComponent& o) : owner (o) {}
+        int getNumRows() override;
+        void paintListBoxItem (int row, juce::Graphics&, int w, int h, bool selected) override;
+        void listBoxItemClicked (int row, const juce::MouseEvent&) override;
+    } issueModel { *this };
+    juce::ListBox issueList { "Issues", &issueModel };
+
+    PagePreview preview;
+    juce::Viewport viewport;
+    std::unique_ptr<juce::FileChooser> chooser;
+
+    Job* job() const { return current >= 0 && current < jobs.size() ? jobs[current] : nullptr; }
+    void refresh();
+    void showIssue (int issue);
+    void saveCurrent();
+    void saveAll();
+    void openInNoterator();
+    juce::File noteratorApp() const;
+    static juce::String ui (const char* s) { return juce::String::fromUTF8 (s); }
+
+    int getNumRows() override { return jobs.size(); }
+    void paintListBoxItem (int row, juce::Graphics&, int w, int h, bool selected) override;
+    void selectedRowsChanged (int row) override;
+};
+
+} // namespace ans
