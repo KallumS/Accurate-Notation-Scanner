@@ -72,8 +72,8 @@ Conversion convertPdf (const std::string& path)
             if (p.kind == PageVerdict::Unreadable) { ++unreadable; if (reason.empty()) reason = p.reason; }
         }
         if (scanned > 0 && unreadable == 0)
-            c.error = "This PDF is a scan - a picture of the page - not notation made on a computer. "
-                      "It was not converted: reading a picture means guessing, and this app only reads what it can be sure of.";
+            c.error = "This PDF is a scan \u2014 a picture of the page \u2014 so it was not converted. "
+                      "Only scores made on a computer can be read exactly.";
         else if (unreadable > 0)
             c.error = reason;
         else
@@ -98,7 +98,7 @@ std::string Conversion::summary() const
     std::string out = "Read " + plural (read.barsRead, "bar", "bars") + " in " + plural (static_cast<int> (s.parts.size()), "part", "parts") + ".";
     if (verdict == Clean) out += " Every bar checked out.";
     else if (read.barsWithIssues > 0)
-        out += " " + plural (read.barsWithIssues, "bar needs", "bars need") + " a look - " + (read.barsWithIssues == 1 ? "it is" : "they are") + " marked.";
+        out += " " + plural (read.barsWithIssues, "bar needs", "bars need") + " a look \u2014 " + (read.barsWithIssues == 1 ? "it is" : "they are") + " marked.";
     else
         out += " Some things need a look - see the list.";
     if (scanned > 0) out += " " + plural (scanned, "scanned page was", "scanned pages were") + " skipped.";

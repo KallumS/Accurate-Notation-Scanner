@@ -262,7 +262,14 @@ void recordImageMask (fz_context* ctx, fz_device* dev, fz_image* img, fz_matrix 
 struct Context
 {
     fz_context* ctx = fz_new_context (nullptr, nullptr, FZ_STORE_DEFAULT);
-    Context() { if (ctx != nullptr) fz_register_document_handlers (ctx); }
+    Context()
+    {
+        if (ctx == nullptr) return;
+        fz_register_document_handlers (ctx);
+        // MuPDF's notes about repairing damaged files are not for the user.
+        fz_set_warning_callback (ctx, [] (void*, const char*) {}, nullptr);
+        fz_set_error_callback (ctx, [] (void*, const char*) {}, nullptr);
+    }
     ~Context() { if (ctx != nullptr) fz_drop_context (ctx); }
 };
 
@@ -271,6 +278,7 @@ struct Context
 fz_document* openDocument (fz_context* ctx, const std::string& path, std::string& error)
 {
     fz_document* doc = nullptr;
+    fz_var (doc);
     fz_try (ctx)
         doc = fz_open_document (ctx, path.c_str());
     fz_catch (ctx)
@@ -285,6 +293,44 @@ fz_document* openDocument (fz_context* ctx, const std::string& path, std::string
         return nullptr;
     }
     return doc;
+}
+// Runs one page through the recording device. False if MuPDF gave up on it.
+bool readPage (fz_context* ctx, fz_document* doc, int index, PageInk& ink)
+{
+    fz_page* page = nullptr;
+    fz_device* dev = nullptr;
+    bool ok = true;
+    fz_var (page);
+    fz_var (dev);
+    fz_var (ok);
+    fz_try (ctx)
+    {
+        page = fz_load_page (ctx, doc, index);
+        const fz_rect bounds = fz_bound_page (ctx, page);
+        ink.width = bounds.x1 - bounds.x0;
+        ink.height = bounds.y1 - bounds.y0;
+
+        auto* rec = fz_new_derived_device (ctx, Recorder);
+        rec->page = &ink;
+        rec->super.fill_path = recordFillPath;
+        rec->super.stroke_path = recordStrokePath;
+        rec->super.fill_text = recordText;
+        rec->super.stroke_text = recordStrokeText;
+        rec->super.fill_image = recordImage;
+        rec->super.fill_image_mask = recordImageMask;
+        dev = &rec->super;
+
+        fz_run_page (ctx, page, dev, fz_identity, nullptr);
+        fz_close_device (ctx, dev);
+    }
+    fz_always (ctx)
+    {
+        fz_drop_device (ctx, dev);
+        fz_drop_page (ctx, page);
+    }
+    fz_catch (ctx)
+        ok = false;
+    return ok;
 }
 } // namespace
 
@@ -302,6 +348,7 @@ PdfContents readPdf (const std::string& path)
     if (fz_lookup_metadata (ctx, doc, FZ_META_INFO_TITLE, title, sizeof title) > 0) out.title = title;
 
     int pages = 0;
+    fz_var (pages);
     fz_try (ctx)
         pages = fz_count_pages (ctx, doc);
     fz_catch (ctx)
@@ -312,40 +359,8 @@ PdfContents readPdf (const std::string& path)
     {
         PageInk& ink = out.pages[static_cast<size_t> (i)];
         ink.number = i;
-        fz_page* page = nullptr;
-        fz_device* dev = nullptr;
-        fz_var (page);
-        fz_var (dev);
-        fz_try (ctx)
-        {
-            page = fz_load_page (ctx, doc, i);
-            const fz_rect bounds = fz_bound_page (ctx, page);
-            ink.width = bounds.x1 - bounds.x0;
-            ink.height = bounds.y1 - bounds.y0;
-
-            auto* rec = fz_new_derived_device (ctx, Recorder);
-            rec->page = &ink;
-            rec->super.fill_path = recordFillPath;
-            rec->super.stroke_path = recordStrokePath;
-            rec->super.fill_text = recordText;
-            rec->super.stroke_text = recordStrokeText;
-            rec->super.fill_image = recordImage;
-            rec->super.fill_image_mask = recordImageMask;
-            dev = &rec->super;
-
-            fz_run_page (ctx, page, dev, fz_identity, nullptr);
-            fz_close_device (ctx, dev);
-        }
-        fz_always (ctx)
-        {
-            fz_drop_device (ctx, dev);
-            fz_drop_page (ctx, page);
-        }
-        fz_catch (ctx)
-        {
-            if (out.error.empty())
-                out.error = "Page " + std::to_string (i + 1) + " could not be read (" + fz_caught_message (ctx) + ").";
-        }
+        if (! readPage (ctx, doc, i, ink) && out.error.empty())
+            out.error = "Page " + std::to_string (i + 1) + " could not be read.";
         removeDuplicates (ink);
     }
     fz_drop_document (ctx, doc);
@@ -359,6 +374,7 @@ int pageCount (const std::string& path)
     fz_document* doc = openDocument (c.ctx, path, error);
     if (doc == nullptr) return 0;
     int n = 0;
+    fz_var (n);
     fz_try (c.ctx)
         n = fz_count_pages (c.ctx, doc);
     fz_catch (c.ctx)

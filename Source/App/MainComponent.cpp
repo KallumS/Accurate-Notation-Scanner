@@ -102,6 +102,7 @@ void PagePreview::paint (juce::Graphics& g)
     const juce::Rectangle<float> area (12.0f, 12.0f, image.getWidth() / pixels, image.getHeight() / pixels);
     g.setColour (juce::Colours::black.withAlpha (0.4f));
     g.fillRect (area.translated (2, 3));
+    g.setOpacity (1.0f);
     g.drawImage (image, area);
 
     // The bars that need a look.
@@ -286,12 +287,12 @@ void MainComponent::paint (juce::Graphics& g)
         g.setColour (j->done && j->result.verdict == Conversion::Rejected ? theme::warnText : theme::textDim);
         g.setFont (font (14));
         g.drawFittedText (j->done ? juce::String::fromUTF8 (j->result.summary().c_str()) : verdictText (*j),
-                          header.withTrimmedRight (110), juce::Justification::topLeft, 2);
+                          header.withTrimmedRight (110), juce::Justification::topLeft, 2, 1.0f);
         if (j->pages > 0)
         {
             g.setColour (theme::textDim);
             g.drawText ("Page " + juce::String (currentPage + 1) + " of " + juce::String (j->pages),
-                        header.withTrimmedRight (56).removeFromRight (120).withY (header.getY() - 24).withHeight (24),
+                        header.withTrimmedRight (68).removeFromRight (120).withY (header.getY() - 24).withHeight (24),
                         juce::Justification::centredRight);
         }
     }
@@ -308,7 +309,7 @@ void MainComponent::paint (juce::Graphics& g)
         g.setFont (font (15));
         g.drawFittedText (juce::String::fromUTF8 (
                               "They become MusicXML for Dorico, Sibelius, MuseScore, Finale and Noterator.\n"
-                              "Scores made on a computer - exported from a notation program - are read exactly, "
+                              "Scores made on a computer \u2014 exported from a notation program \u2014 are read exactly, "
                               "and every bar is checked. Scans and handwriting are not read: that would mean guessing."),
                           area.withTrimmedTop (area.getHeight() / 2 + 12).reduced (60, 0), juce::Justification::centredTop, 4);
     }

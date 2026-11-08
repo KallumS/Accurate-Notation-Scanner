@@ -1722,11 +1722,7 @@ SystemRead PageReader::readSystem (int systemIndex, std::vector<StaffState>& sta
                 it.duration = it.grace ? Fraction (0) : itemDuration (it);
             }
 
-            auto sumOf = [&] (const std::vector<int>& v) {
-                Fraction f;
-                for (int ii : v) if (! items[static_cast<size_t> (ii)].grace) f += items[static_cast<size_t> (ii)].duration;
-                return f;
-            };
+
 
             // A whole rest alone fills the bar, whatever its length.
             std::vector<int> normals;

@@ -1,0 +1,26 @@
+Installing Accurate Notation Scanner on a Mac
+=============================================
+
+1. Drag Accurate Notation Scanner into the Applications folder (the
+   shortcut beside it).
+
+2. The first time only: in Applications, RIGHT-click (or Control-click)
+   Accurate Notation Scanner and choose Open, then Open again in the box
+   that appears.
+
+   macOS asks because the app is not yet signed with an Apple Developer
+   certificate. After this first time it opens normally with a double-click.
+
+   If macOS says the app "is damaged and can't be opened", open Terminal
+   (Applications > Utilities > Terminal), paste this line and press Return:
+
+       xattr -cr "/Applications/Accurate Notation Scanner.app"
+
+   then open it again. That removes the "downloaded from the internet" mark,
+   which is all the warning is about.
+
+3. Drop PDF scores on its window (or on its icon in the Dock). Each one is
+   read, checked bar by bar, and can be saved as MusicXML for Dorico,
+   Sibelius, MuseScore, Finale or Noterator.
+
+It needs a Mac with Apple silicon (M1 or later).
