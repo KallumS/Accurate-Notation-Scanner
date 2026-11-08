@@ -1078,7 +1078,7 @@ SystemRead PageReader::readSystem (int systemIndex, std::vector<StaffState>& sta
         for (size_t r = 0; r < ranges.size(); ++r)
         {
             const bool music = hasMusicIn (ranges[r].x0, ranges[r].x1);
-            if (! music && r == 0 && ranges.size() > 1)
+            if (! music && kept.empty() && r + 1 < ranges.size())
             {
                 // The opening before a start-repeat: part of the first bar.
                 carriedLeft = columnAt (ranges[r].x1);
@@ -2368,7 +2368,7 @@ ReadResult readScore (const std::vector<PageInk>& pages)
             for (size_t p = 0; p < parts.size(); ++p)
             {
                 if (b >= parts[p].measures.size()) continue;
-                const auto& m = parts[p].measures[b];
+                auto& m = parts[p].measures[b];
                 if (m.multiRest > 0) continue;
                 std::map<std::pair<int, int>, Fraction> voiceEnd;
                 bool hasEvents = false;
@@ -2381,6 +2381,9 @@ ReadResult readScore (const std::vector<PageInk>& pages)
                 }
                 if (! hasEvents)
                 {
+                    Event e;
+                    e.rest = true; e.measureRest = true; e.hidden = true; e.type = 0; e.duration = length;
+                    parts[p].measures[b].events.push_back (e);
                     result.issues.push_back ({ Issue::Warning, m.places.empty() ? -1 : m.places.front().page, m.places.empty() ? Box {} : m.places.front().box,
                                               static_cast<int> (b), static_cast<int> (p), "This bar has no notes or rests in it." });
                     continue;

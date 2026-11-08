@@ -99,6 +99,7 @@ struct Event
 {
     bool rest = false;
     bool measureRest = false;      // a whole rest filling the bar
+    bool hidden = false;           // not printed: a bar left empty on the page
     bool grace = false, graceSlash = false;
     int type = 2;                  // log2 of the note value: -1 breve, 0 whole, 1 half, 2 quarter, 3 eighth...
     int dots = 0;

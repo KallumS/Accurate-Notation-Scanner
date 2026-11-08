@@ -284,7 +284,7 @@ std::string toMusicXml (const Score& score)
                     const size_t noteCount = e.rest ? 1 : e.notes.size();
                     for (size_t n = 0; n < noteCount; ++n)
                     {
-                        w.open ("note");
+                        w.open ("note", e.hidden ? xml::Writer::Attributes { { "print-object", "no" } } : xml::Writer::Attributes {});
                         if (e.grace) w.empty ("grace", e.graceSlash ? xml::Writer::Attributes { { "slash", "yes" } } : xml::Writer::Attributes {});
                         if (n > 0) w.empty ("chord");
                         const Note* note = e.rest ? nullptr : &e.notes[n];

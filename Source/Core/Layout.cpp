@@ -207,10 +207,57 @@ std::vector<BarColumn> columnsFor (const PageInk& page, const std::vector<Staff>
     const Staff& last = staves[static_cast<size_t> (sys.staves.back())];
     const double sp = first.space;
 
-    for (size_t i = 0; i < page.segments.size(); ++i)
+    // Upright strokes, with pieces of one line joined (a barline can be
+    // drawn in parts).
+    struct Upright { Segment seg; std::vector<int> parts; };
+    std::vector<Upright> uprights;
     {
-        const auto& s = page.segments[i];
-        if (! s.vertical (0.03) || s.thickness > 1.2 * sp) continue;
+        std::vector<int> order;
+        for (size_t i = 0; i < page.segments.size(); ++i)
+            if (page.segments[i].vertical (0.03) && page.segments[i].thickness <= 1.2 * sp) order.push_back (static_cast<int> (i));
+        std::sort (order.begin(), order.end(), [&] (int a, int b) {
+            const auto& p = page.segments[static_cast<size_t> (a)];
+            const auto& q = page.segments[static_cast<size_t> (b)];
+            if (std::abs (p.a.x - q.a.x) > 0.15) return p.a.x < q.a.x;
+            return p.minY() < q.minY();
+        });
+        for (int i : order)
+        {
+            const auto& s = page.segments[static_cast<size_t> (i)];
+            if (! uprights.empty())
+            {
+                auto& u = uprights.back();
+                if (std::abs (u.seg.a.x - s.a.x) <= 0.15 && std::abs (u.seg.thickness - s.thickness) <= 0.15
+                    && s.minY() <= u.seg.maxY() + 0.5 && s.maxY() > u.seg.maxY())
+                {
+                    u.seg.b.y = s.maxY();
+                    u.parts.push_back (i);
+                    continue;
+                }
+            }
+            Segment seg = s;
+            seg.a = { s.a.x, s.minY() };
+            seg.b = { s.b.x, s.maxY() };
+            uprights.push_back ({ seg, { i } });
+        }
+        // Every piece is also a candidate on its own.
+        std::vector<Upright> singles;
+        for (const auto& u : uprights)
+            if (u.parts.size() > 1)
+                for (int i : u.parts)
+                {
+                    const auto& s = page.segments[static_cast<size_t> (i)];
+                    Segment seg = s;
+                    seg.a = { s.a.x, s.minY() };
+                    seg.b = { s.b.x, s.maxY() };
+                    singles.push_back ({ seg, { i } });
+                }
+        uprights.insert (uprights.end(), singles.begin(), singles.end());
+    }
+
+    for (const auto& up : uprights)
+    {
+        const auto& s = up.seg;
         if (s.minY() < first.top() - 0.3 * sp || s.maxY() > last.bottom() + 0.3 * sp) continue;
         const double x = (s.a.x + s.b.x) * 0.5;
         if (x < sys.x0 - 0.6 * sp || x > sys.x1 + 0.6 * sp) continue;
@@ -223,7 +270,9 @@ std::vector<BarColumn> columnsFor (const PageInk& page, const std::vector<Staff>
             bottomOk = bottomOk || std::abs (s.maxY() - st.bottom()) <= 0.3 * sp;
         }
         if (! topOk || ! bottomOk) continue;
-        if (touchesNotehead (page, s, sp)) continue;
+        bool stem = false;
+        for (int part : up.parts) stem = stem || touchesNotehead (page, page.segments[static_cast<size_t> (part)], sp);
+        if (stem) continue;
 
         bool any = false;
         for (size_t k = 0; k < sys.staves.size(); ++k)
@@ -231,11 +280,12 @@ std::vector<BarColumn> columnsFor (const PageInk& page, const std::vector<Staff>
             const auto& st = staves[static_cast<size_t> (sys.staves[k])];
             if (s.minY() <= st.top() + 0.3 * sp && s.maxY() >= st.bottom() - 0.3 * sp)
             {
-                perStaff[k].push_back ({ x, s.thickness, s.dashed, static_cast<int> (i) });
+                perStaff[k].push_back ({ x, s.thickness, s.dashed, up.parts.front() });
                 any = true;
             }
         }
-        if (any) barlineSegments.push_back (static_cast<int> (i));
+        if (any)
+            for (int part : up.parts) barlineSegments.push_back (part);
     }
 
     // Strokes close together are one barline (thin-thick, thin-thin...).
@@ -280,7 +330,7 @@ std::vector<BarColumn> columnsFor (const PageInk& page, const std::vector<Staff>
     {
         if (c.staves < need) continue;
         // The line that opens the system is not a barline between bars.
-        if (c.x0 <= sys.x0 + 0.5 * sp && c.strokes.size() == 1) continue;
+        if (c.x0 <= sys.x0 + 0.5 * sp) continue;
 
         BarColumn b;
         b.x0 = c.x0 - c.strokes.front().thickness * 0.5;
