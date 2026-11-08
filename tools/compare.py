@@ -15,7 +15,7 @@ and with --json, a machine-readable summary.
 import difflib, json, sys, warnings
 from collections import Counter
 warnings.filterwarnings("ignore")
-from music21 import converter, note, chord, stream
+from music21 import converter, note, chord, stream, harmony
 
 
 def events(path):
@@ -26,7 +26,7 @@ def events(path):
         for m in p.getElementsByClass(stream.Measure):
             items = Counter()
             for el in m.recurse().notesAndRests:
-                if el.duration.isGrace:
+                if el.duration.isGrace or isinstance(el, harmony.Harmony):
                     continue
                 off = round(float(el.getOffsetInHierarchy(m)), 4)
                 dur = round(float(el.duration.quarterLength), 4)

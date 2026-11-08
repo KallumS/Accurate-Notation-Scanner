@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <functional>
 #include <map>
 #include <optional>
@@ -300,6 +301,7 @@ private:
     void buildItems();
     void findDots();
     void findTies();
+    bool nextTo (int a, int b) const;
     void findSlurs (const std::set<int>& tieCurves);
     void findArticulations();
 };
@@ -807,6 +809,25 @@ void PageReader::findDots()
     }
 }
 
+// Whether two heads are of neighbouring notes: nothing of the same voice
+// (same stem direction, or a rest) stands between them.
+bool PageReader::nextTo (int a, int b) const
+{
+    const auto& A = heads[static_cast<size_t> (a)];
+    const auto& B = heads[static_cast<size_t> (b)];
+    const int ia = headItem[static_cast<size_t> (a)], ib = headItem[static_cast<size_t> (b)];
+    const int dir = ia >= 0 ? items[static_cast<size_t> (ia)].dir : 0;
+    for (size_t i = 0; i < items.size(); ++i)
+    {
+        if (static_cast<int> (i) == ia || static_cast<int> (i) == ib) continue;
+        const auto& it = items[i];
+        if (it.staff != A.staff || it.small) continue;
+        if (it.x <= A.x1 || it.x >= B.x0) continue;
+        if (it.rest || it.dir == 0 || dir == 0 || it.dir == dir) return false;
+    }
+    return true;
+}
+
 void PageReader::findTies()
 {
     std::set<int> used;
@@ -823,13 +844,17 @@ void PageReader::findTies()
         int bestA = -1, bestB = -1;
         double bestCost = 1e9;
         std::vector<int> starts, ends;
+        // Heads near either end, on whichever staff (a tie above a staff
+        // can be nearer the staff above).
         for (size_t h = 0; h < heads.size(); ++h)
         {
             const auto& hd = heads[h];
-            if (hd.staff != st) continue;
-            if (std::abs (hd.y - cv.left.y) <= 1.3 * sp && cv.left.x >= hd.x0 - 0.2 * sp && cv.left.x <= hd.x1 + 1.3 * sp)
+            const auto& hs = layout.staves[static_cast<size_t> (hd.staff)];
+            if (hs.system != staff.system) continue;
+            const double hsp = hs.space;
+            if (std::abs (hd.y - cv.left.y) <= 1.3 * hsp && cv.left.x >= hd.x0 - 0.2 * hsp && cv.left.x <= hd.x1 + 1.3 * hsp)
                 starts.push_back (static_cast<int> (h));
-            if (std::abs (hd.y - cv.right.y) <= 1.3 * sp && cv.right.x >= hd.x0 - 1.3 * sp && cv.right.x <= hd.x1 + 0.2 * sp)
+            if (std::abs (hd.y - cv.right.y) <= 1.3 * hsp && cv.right.x >= hd.x0 - 1.3 * hsp && cv.right.x <= hd.x1 + 0.2 * hsp)
                 ends.push_back (static_cast<int> (h));
         }
         for (int a : starts)
@@ -837,12 +862,21 @@ void PageReader::findTies()
             {
                 const auto& A = heads[static_cast<size_t> (a)];
                 const auto& B = heads[static_cast<size_t> (b)];
-                if (A.line != B.line || B.x0 <= A.x1 - 0.1 * sp) continue;
+                if (A.staff != B.staff || A.line != B.line || B.x0 <= A.x1 - 0.1 * sp || A.small != B.small) continue;
                 if (startUsed[static_cast<size_t> (a)] || endUsed[static_cast<size_t> (b)]) continue;
+                if (! nextTo (a, b)) continue;
                 const double cost = std::abs (A.y - cv.left.y) + std::abs (B.y - cv.right.y)
                                   + std::abs (cv.left.x - A.x1) * 0.3 + std::abs (cv.right.x - B.x0) * 0.3;
                 if (cost < bestCost) { bestCost = cost; bestA = a; bestB = b; }
             }
+        if (std::getenv ("ANS_DEBUG_TIES") != nullptr)
+        {
+            std::fprintf (stderr, "curve %zu (%.1f,%.1f)-(%.1f,%.1f) starts:", c, cv.left.x, cv.left.y, cv.right.x, cv.right.y);
+            for (int a : starts) std::fprintf (stderr, " %d(x%.1f l%d)", a, heads[static_cast<size_t> (a)].x0, heads[static_cast<size_t> (a)].line);
+            std::fprintf (stderr, " ends:");
+            for (int b : ends) std::fprintf (stderr, " %d(x%.1f l%d)", b, heads[static_cast<size_t> (b)].x0, heads[static_cast<size_t> (b)].line);
+            std::fprintf (stderr, " -> %d %d\n", bestA, bestB);
+        }
         if (bestA >= 0)
         {
             ties.push_back ({ bestA, bestB, false, false });
@@ -852,14 +886,15 @@ void PageReader::findTies()
         }
         // A tie running off the end of a system, or in from the start of one.
         const auto& sys = layout.systems[static_cast<size_t> (staff.system)];
-        if (cv.right.x >= sys.x1 - 2.5 * sp && cv.box.width() < 6 * sp)
+        if (cv.right.x >= sys.x1 - 2.5 * sp)
         {
             for (int a : starts)
                 if (! startUsed[static_cast<size_t> (a)] && heads[static_cast<size_t> (a)].x1 < cv.right.x)
                 {
-                    bool beyond = false;   // no head on that line further right
-                    for (size_t h = 0; h < heads.size(); ++h)
-                        beyond = beyond || (heads[h].staff == st && heads[h].line == heads[static_cast<size_t> (a)].line && heads[h].x0 > heads[static_cast<size_t> (a)].x1 && heads[h].x0 < cv.right.x);
+                    if (heads[static_cast<size_t> (a)].small) continue;
+                    bool beyond = false;   // its note is the staff's last in this system
+                    for (const auto& it : items)
+                        beyond = beyond || (it.staff == heads[static_cast<size_t> (a)].staff && ! it.small && it.x > heads[static_cast<size_t> (a)].x1 - 0.1 * sp);
                     if (beyond) continue;
                     ties.push_back ({ a, -1, true, false });
                     startUsed[static_cast<size_t> (a)] = true;
@@ -868,18 +903,18 @@ void PageReader::findTies()
                 }
             if (used.count (static_cast<int> (c))) continue;
         }
-        if (cv.box.width() < 6 * sp)
         {
             for (int b : ends)
             {
                 if (endUsed[static_cast<size_t> (b)]) continue;
                 bool earlier = false;   // the first note on its line in this system
                 for (size_t h = 0; h < heads.size(); ++h)
-                    earlier = earlier || (heads[h].staff == st && heads[h].x1 < cv.left.x + 0.1 * sp && heads[h].line == heads[static_cast<size_t> (b)].line);
+                    earlier = earlier || (heads[h].staff == heads[static_cast<size_t> (b)].staff && heads[h].x1 < cv.left.x + 0.1 * sp && heads[h].line == heads[static_cast<size_t> (b)].line);
                 if (earlier) continue;
-                bool firstThing = true; // nothing but clef/key/time before the curve
+                if (heads[static_cast<size_t> (b)].small) continue;
+                bool firstThing = true; // the curve starts before every note on the staff
                 for (const auto& it : items)
-                    firstThing = firstThing && ! (it.staff == st && it.x1 < cv.left.x - 0.1 * sp);
+                    firstThing = firstThing && ! (it.staff == heads[static_cast<size_t> (b)].staff && it.x <= cv.left.x);
                 if (! firstThing) continue;
                 ties.push_back ({ -1, b, false, true });
                 endUsed[static_cast<size_t> (b)] = true;
@@ -1399,7 +1434,22 @@ SystemRead PageReader::readSystem (int systemIndex, std::vector<StaffState>& sta
             }
         }
         st.key = key;
-        for (const auto& ca : clefs) st.clef = ca.clef;   // the next system goes on from the last clef
+        for (const auto& ca : clefs) st.clef = ca.clef;
+
+        // A curve between two different pitches on one line (F to F-flat) is a slur, not a tie.
+        for (const auto& t : ties)
+        {
+            if (t.from < 0 || t.to < 0 || heads[static_cast<size_t> (t.from)].staff != si) continue;
+            const int ia = headItem[static_cast<size_t> (t.from)], ib = headItem[static_cast<size_t> (t.to)];
+            if (ia < 0 || ib < 0) continue;
+            Note* na = nullptr;
+            Note* nb = nullptr;
+            for (auto& n : items[static_cast<size_t> (ia)].notes) if (n.line == heads[static_cast<size_t> (t.from)].line) na = &n;
+            for (auto& n : items[static_cast<size_t> (ib)].notes) if (n.line == heads[static_cast<size_t> (t.to)].line) nb = &n;
+            if (na == nullptr || nb == nullptr || na->pitch.alter == nb->pitch.alter) continue;
+            na->tieStart = false;
+            nb->tieStop = false;
+        }   // the next system goes on from the last clef
 
         // ties leaving this system
         st.openTies.clear();
@@ -2090,6 +2140,47 @@ ReadResult readScore (const std::vector<PageInk>& pages)
             result.issues.push_back ({ Issue::Warning, -1, {}, 0, static_cast<int> (p), "No time signature was found; 4/4 was assumed." });
         }
     }
+
+    // Every tie must land: a start needs a stop on the same pitch at the next
+    // note of its staff, and a stop needs that start. Half a slur at a
+    // system break looks like half a tie; this tells them apart.
+    for (auto& part : parts)
+        for (int staff = 1; staff <= part.staves; ++staff)
+        {
+            struct Ref { Note* note; Fraction at, end; };
+            std::vector<Ref> notes;
+            Fraction barStart;
+            for (auto& m : part.measures)
+            {
+                Fraction longest;
+                for (auto& e : m.events)
+                {
+                    if (e.offset + e.duration > longest) longest = e.offset + e.duration;
+                    if (e.staff != staff || e.grace || e.rest) continue;
+                    for (auto& n : e.notes) notes.push_back ({ &n, barStart + e.offset, barStart + e.offset + e.duration });
+                }
+                barStart += longest;
+            }
+            auto samePitch = [] (const Note& a, const Note& b) {
+                return a.pitch.step == b.pitch.step && a.pitch.octave == b.pitch.octave && a.pitch.alter == b.pitch.alter;
+            };
+            for (auto& r : notes)
+            {
+                if (! r.note->tieStart) continue;
+                bool found = false;
+                for (auto& o : notes)
+                    if (o.at == r.end && o.note->tieStop && samePitch (*o.note, *r.note)) found = true;
+                if (! found) r.note->tieStart = false;
+            }
+            for (auto& r : notes)
+            {
+                if (! r.note->tieStop) continue;
+                bool found = false;
+                for (auto& o : notes)
+                    if (o.end == r.at && o.note->tieStart && samePitch (*o.note, *r.note)) found = true;
+                if (! found) r.note->tieStop = false;
+            }
+        }
 
     // The bar check, and the pickup.
     if (! parts.empty())
