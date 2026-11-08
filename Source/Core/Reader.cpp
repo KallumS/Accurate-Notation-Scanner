@@ -418,6 +418,13 @@ void PageReader::findHeads()
         const auto& g = page.glyphs[i];
         const auto kind = headKind (g.name);
         if (kind == HeadKind::None || glyphStaff[i] < 0) continue;
+        // The same head drawn twice (a unison shared by two voices) is one head.
+        bool twice = false;
+        for (const auto& o : heads)
+            twice = twice || (page.glyphs[static_cast<size_t> (o.glyph)].name == g.name
+                              && std::abs (page.glyphs[static_cast<size_t> (o.glyph)].origin.x - g.origin.x) < 0.1
+                              && std::abs (page.glyphs[static_cast<size_t> (o.glyph)].origin.y - g.origin.y) < 0.1);
+        if (twice) { glyphUsed[i] = true; continue; }
         const auto& staff = layout.staves[static_cast<size_t> (glyphStaff[i])];
         Head h;
         h.glyph = static_cast<int> (i);
@@ -1571,6 +1578,55 @@ SystemRead PageReader::readSystem (int systemIndex, std::vector<StaffState>& sta
         }
     }
 
+    // --- a time grid for the system: in engraved music, notes sounding
+    // together stand in one column, whatever their staff. Staves holding a
+    // single voice that fills its bar give each column's beat.
+    std::vector<std::vector<std::pair<double, Fraction>>> grid (ranges.size());
+    for (int k = 0; k < nStaves; ++k)
+    {
+        const int si = sys.staves[static_cast<size_t> (k)];
+        const double sp = layout.staves[static_cast<size_t> (si)].space;
+        TimeSignature time = startTime[static_cast<size_t> (k)];
+        for (size_t r = 0; r < ranges.size(); ++r)
+        {
+            if (out.staves[static_cast<size_t> (k)][r].time) time = *out.staves[static_cast<size_t> (k)][r].time;
+            std::vector<int> list;
+            for (size_t i = 0; i < items.size(); ++i)
+                if (items[i].staff == si && items[i].bar == static_cast<int> (r) && ! items[i].small) list.push_back (static_cast<int> (i));
+            std::sort (list.begin(), list.end(), [&] (int a, int b) { return items[static_cast<size_t> (a)].x < items[static_cast<size_t> (b)].x; });
+            bool together = false;
+            for (size_t a = 0; a + 1 < list.size(); ++a)
+                together = together || std::abs (items[static_cast<size_t> (list[a])].x - items[static_cast<size_t> (list[a + 1])].x) < 0.7 * sp;
+            if (list.empty()) continue;
+            if (together)
+            {
+                // two voices: the upper one (stems up, rests high) may still fill the bar
+                const double mid = layout.staves[static_cast<size_t> (si)].middle();
+                std::vector<int> upper;
+                for (int ii : list)
+                {
+                    const auto& it = items[static_cast<size_t> (ii)];
+                    if (it.rest ? (it.y0 + it.y1) * 0.5 < mid - 0.5 * sp : it.dir == 1) upper.push_back (ii);
+                }
+                list = upper;
+                bool still = false;
+                for (size_t a = 0; a + 1 < list.size(); ++a)
+                    still = still || std::abs (items[static_cast<size_t> (list[a])].x - items[static_cast<size_t> (list[a + 1])].x) < 0.7 * sp;
+                if (still || list.empty()) continue;
+            }
+            Fraction t;
+            std::vector<std::pair<double, Fraction>> cols;
+            for (int ii : list)
+            {
+                const auto& it = items[static_cast<size_t> (ii)];
+                cols.push_back ({ (it.x + it.x1) * 0.5, t });
+                t += itemDuration (it);
+            }
+            if (t != time.length()) continue;
+            for (auto& c : cols) grid[r].push_back (c);
+        }
+    }
+
     // --- voices, timing and the check, bar by bar
     for (int k = 0; k < nStaves; ++k)
     {
@@ -1634,6 +1690,19 @@ SystemRead PageReader::readSystem (int systemIndex, std::vector<StaffState>& sta
             if (list.empty()) continue;
             bar.hasNotes = true;
 
+            if (std::getenv ("ANS_DEBUG_ITEMS") != nullptr)
+            {
+                std::fprintf (stderr, "page %d staff %d bar %zu:\n", page.number + 1, si, r + 1);
+                for (int ii : list)
+                {
+                    const auto& it = items[static_cast<size_t> (ii)];
+                    std::fprintf (stderr, "  x%.1f-%.1f %s type%d dots%d dir%d small%d stem%d levels%d lines:",
+                                  it.x, it.x1, it.rest ? "REST" : "note", it.type, it.dots, it.dir, it.small, it.stem,
+                                  it.stem >= 0 ? static_cast<int> (stems[static_cast<size_t> (it.stem)].levels.size()) : -1);
+                    for (int h : it.heads) std::fprintf (stderr, " %d", heads[static_cast<size_t> (h)].line);
+                    std::fprintf (stderr, "\n");
+                }
+            }
             // grace notes: small, and followed by a full-size note
             for (int ii : list)
             {
@@ -1735,12 +1804,22 @@ SystemRead PageReader::readSystem (int systemIndex, std::vector<StaffState>& sta
             for (size_t v = 0; v < voices.size(); ++v)
             {
                 Fraction t;
+                bool firstAnchored = false, firstSeen = false;
                 for (int ii : voices[v])
                 {
                     auto& it = items[static_cast<size_t> (ii)];
-                    if (v > 0 && ! it.grace)
-                        for (const auto& c : columns)
-                            if (std::abs (c.first - it.x) < 0.6 * sp && c.second > t) { t = c.second; break; }
+                    if (! it.grace && ! it.measureRest)
+                    {
+                        // a gap in this voice: its next note stands in a later column
+                        bool anchored = false;
+                        const double cx = (it.x + it.x1) * 0.5;
+                        for (const auto& c : grid[r])
+                            if (std::abs (c.first - cx) < 0.7 * sp) { anchored = true; if (c.second > t) t = c.second; break; }
+                        if (v > 0)
+                            for (const auto& c : columns)
+                                if (std::abs (c.first - it.x) < 0.6 * sp) { anchored = true; if (c.second > t) t = c.second; break; }
+                        if (! firstSeen) { firstAnchored = anchored; firstSeen = true; }
+                    }
                     it.offset = t;
                     it.voice = static_cast<int> (v) + 1;
                     if (! it.grace)
@@ -1750,6 +1829,8 @@ SystemRead PageReader::readSystem (int systemIndex, std::vector<StaffState>& sta
                     }
                 }
                 if (t > longest) longest = t;
+                if (v > 0 && t < length && firstSeen && ! firstAnchored)
+                    bar.problems.push_back ({ Issue::Warning, "Voice " + std::to_string (v + 1) + " does not fill the bar and its first note could not be lined up with another part; check where it starts." });
                 if (t > length)
                     bar.problems.push_back ({ Issue::Error, "Voice " + std::to_string (v + 1) + " adds up to " + t.str() + " beats, more than the "
                                                              + std::to_string (time.beats) + "/" + std::to_string (time.beatType) + " bar holds." });
@@ -2097,6 +2178,42 @@ ReadResult readScore (const std::vector<PageInk>& pages)
                     m.clefs.insert (m.clefs.begin(), c);
                 }
         }
+    }
+
+    // A multi-bar rest stands for that many bars (the same in every part).
+    if (! parts.empty())
+    {
+        const size_t bars = parts.front().measures.size();
+        std::vector<int> count (bars, 1), newIndex (bars, 0);
+        for (const auto& part : parts)
+            for (size_t b = 0; b < part.measures.size() && b < bars; ++b) count[b] = std::max (count[b], part.measures[b].multiRest);
+        int next = 0;
+        for (size_t b = 0; b < bars; ++b) { newIndex[b] = next; next += count[b]; }
+        for (auto& part : parts)
+        {
+            std::vector<Measure> expanded;
+            for (size_t b = 0; b < part.measures.size(); ++b)
+            {
+                auto m = part.measures[b];
+                const int n = b < bars ? count[b] : 1;
+                const Barline right = m.right;
+                if (n > 1) { m.right = Barline {}; m.multiRest = n; }
+                expanded.push_back (m);
+                for (int extra = 1; extra < n; ++extra)
+                {
+                    Measure rest;
+                    rest.places = m.places;
+                    for (const auto& e : m.events)
+                        if (e.measureRest) rest.events.push_back (e);
+                    if (extra + 1 == n) rest.right = right;
+                    expanded.push_back (rest);
+                }
+            }
+            part.measures.swap (expanded);
+            for (size_t b = 0; b < part.measures.size(); ++b) part.measures[b].number = std::to_string (b + 1);
+        }
+        for (auto& is : result.issues)
+            if (is.measureIndex >= 0 && static_cast<size_t> (is.measureIndex) < bars) is.measureIndex = newIndex[static_cast<size_t> (is.measureIndex)];
     }
 
     // Ties across systems, timings and the bar check, once all bars are in.
