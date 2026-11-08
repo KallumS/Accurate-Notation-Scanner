@@ -472,8 +472,25 @@ void PageReader::findStems()
         bool small = true;
         for (int h : cand) small = small && heads[static_cast<size_t> (h)].small;
         const double minFromFree = (small ? 0.9 : 1.4) * sp;
+        // Heads sit left of an up-stem and right of a down-stem. One on the
+        // other side is only the displaced head of a second.
+        std::vector<int> usual, other;
         for (int h : cand)
-            if (std::abs (heads[static_cast<size_t> (h)].y - st.freeY) >= minFromFree) st.heads.push_back (h);
+        {
+            const auto& hd = heads[static_cast<size_t> (h)];
+            if (std::abs (hd.y - st.freeY) < minFromFree) continue;
+            const bool leftOfStem = std::abs (x - hd.x1) <= std::abs (x - hd.x0);
+            ((leftOfStem == (st.dir == 1)) ? usual : other).push_back (h);
+        }
+        st.heads = usual;
+        for (int h : other)
+        {
+            bool second = false;
+            for (int u : usual)
+                second = second || (heads[static_cast<size_t> (u)].staff == heads[static_cast<size_t> (h)].staff
+                                    && std::abs (heads[static_cast<size_t> (u)].line - heads[static_cast<size_t> (h)].line) == 1);
+            if (second) st.heads.push_back (h);
+        }
         if (st.heads.empty()) continue;
         st.staff = heads[static_cast<size_t> (st.heads.front())].staff;
         segmentTaken[i] = true;
@@ -483,14 +500,42 @@ void PageReader::findStems()
     }
 }
 
+// A head both on its own stem's usual side and beside a neighbour's stem
+// belongs to its own.
+static void keepOwnStems (std::vector<Head>& heads, std::vector<Stem>& stems)
+{
+    for (size_t h = 0; h < heads.size(); ++h)
+    {
+        auto& hd = heads[h];
+        if (hd.stems.size() < 2) continue;
+        std::vector<int> usual;
+        for (int s : hd.stems)
+        {
+            const auto& st = stems[static_cast<size_t> (s)];
+            const bool leftOfStem = std::abs (st.x - hd.x1) <= std::abs (st.x - hd.x0);
+            if (leftOfStem == (st.dir == 1)) usual.push_back (s);
+        }
+        if (usual.empty() || usual.size() == hd.stems.size()) continue;
+        for (int s : hd.stems)
+        {
+            if (std::find (usual.begin(), usual.end(), s) != usual.end()) continue;
+            auto& list = stems[static_cast<size_t> (s)].heads;
+            list.erase (std::remove (list.begin(), list.end(), static_cast<int> (h)), list.end());
+        }
+        hd.stems = usual;
+    }
+}
+
 void PageReader::findBeams()
 {
+    keepOwnStems (heads, stems);
+
     for (size_t i = 0; i < page.segments.size(); ++i)
     {
         if (segmentTaken[i]) continue;
         const auto& s = page.segments[i];
         if (s.vertical (0.2)) continue;
-        if (std::abs (s.dy()) > 1.2 * std::abs (s.dx())) continue;
+        if (std::abs (s.dy()) > 4.0 * std::abs (s.dx())) continue;
         const double sp = spaceNear (s.a.x, s.a.y);
         if (s.thickness < 0.22 * sp || s.thickness > 0.85 * sp || s.length() < 0.5 * sp) continue;
         beamSegs.push_back (static_cast<int> (i));
@@ -1077,11 +1122,20 @@ SystemRead PageReader::readSystem (int systemIndex, std::vector<StaffState>& sta
             for (size_t j = 0; j < page.glyphs.size(); ++j)
             {
                 const auto& d = page.glyphs[j];
-                if (timeDigit (d.name) != 8 && ! (timeDigit (d.name) == 1 && false)) continue;
+                if (timeDigit (d.name) != 8) continue;
                 if (d.size > 0.75 * 4.0 * sp) continue;
                 if (d.box.cx() < g.box.x0 - 0.3 * sp || d.box.cx() > g.box.x1 + 0.3 * sp) continue;
                 if (d.box.y0 >= g.box.y1 - 0.5 * sp && d.box.y0 <= g.box.y1 + 1.5 * sp) { c.octave = -1; glyphUsed[j] = true; }
                 else if (d.box.y1 <= g.box.y0 + 0.5 * sp && d.box.y1 >= g.box.y0 - 1.5 * sp) { c.octave = 1; glyphUsed[j] = true; }
+            }
+            // ... or as a number in a text font ("8", "15").
+            for (const auto& t : page.texts)
+            {
+                if (t.text != "8" && t.text != "15") continue;
+                if (t.box.cx() < g.box.x0 - 0.3 * sp || t.box.cx() > g.box.x1 + 0.3 * sp) continue;
+                const int by = t.text == "8" ? 1 : 2;
+                if (t.box.y0 >= g.box.y1 - 0.7 * sp && t.box.y0 <= g.box.y1 + 1.5 * sp) c.octave = -by;
+                else if (t.box.y1 <= g.box.y0 + 0.7 * sp && t.box.y1 >= g.box.y0 - 1.5 * sp) c.octave = by;
             }
             clefs.push_back ({ g.box.x0, c });
             glyphUsed[i] = true;
@@ -2082,6 +2136,26 @@ ReadResult readScore (const std::vector<PageInk>& pages)
                 for (auto& part : parts)
                     if (! part.measures.empty()) { part.measures[0].implicit = true; part.measures[0].number = "0"; }
                 continue;
+            }
+            // A bar split in two around a repeat (3 beats, then 1) is how it
+            // was written, when every part agrees and the halves make a bar.
+            auto lengthOf = [&] (size_t bar) {
+                Fraction most;
+                for (const auto& part : parts)
+                {
+                    if (bar >= part.measures.size()) continue;
+                    for (const auto& e : part.measures[bar].events)
+                        if (! e.grace && e.voice == 1 && e.offset + e.duration > most) most = e.offset + e.duration;
+                }
+                return most;
+            };
+            if (! mismatch && most < length && most > Fraction (0))
+            {
+                const Fraction before = b > 0 ? lengthOf (b - 1) : Fraction (0);
+                const Fraction after = b + 1 < bars ? lengthOf (b + 1) : Fraction (0);
+                if ((b > 0 && before + most == length && timeOf[b - 1].length() == length && ! (b == 1 && pickup))
+                    || (after + most == length && b + 1 < bars && timeOf[b + 1].length() == length))
+                    continue;
             }
             for (size_t p = 0; p < parts.size(); ++p)
             {

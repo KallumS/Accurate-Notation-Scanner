@@ -120,9 +120,12 @@ std::vector<Staff> findStaves (const PageInk& page, std::vector<int>& lineSegmen
                 s.x0 = std::min (s.x0, l.x0);
                 s.x1 = std::max (s.x1, l.x1);
                 used[found[n]] = true;
-                for (int seg : l.parts) lineSegments.push_back (seg);
             }
             s.space = (s.lines[4] - s.lines[0]) / 4.0;
+            // Only the thin pieces are staff line: a beam can lie right on a line.
+            for (int n = 0; n < 5; ++n)
+                for (int seg : lines[found[n]].parts)
+                    if (page.segments[static_cast<size_t> (seg)].thickness <= 0.3 * s.space) lineSegments.push_back (seg);
             staves.push_back (s);
             break;
         }

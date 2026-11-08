@@ -12,7 +12,7 @@ spelling, rhythms, ties, bar lines-up and onsets are. Prints one line:
 
 and with --json, a machine-readable summary.
 """
-import json, sys, warnings
+import difflib, json, sys, warnings
 from collections import Counter
 warnings.filterwarnings("ignore")
 from music21 import converter, note, chord, stream
@@ -61,9 +61,19 @@ def main():
         rp = R[pi] if pi < len(R) else []
         if len(tp) != len(rp):
             problems.append(f"part {pi+1}: truth {len(tp)} bars, read {len(rp)}")
-        for bi in range(max(len(tp), len(rp))):
-            tb = tp[bi] if bi < len(tp) else Counter()
-            rb = rp[bi] if bi < len(rp) else Counter()
+        # Line the bars up first, so one bar too many or too few counts once.
+        key = lambda b: tuple(sorted(b.elements()))
+        sm = difflib.SequenceMatcher(None, [key(b) for b in tp], [key(b) for b in rp], autojunk=False)
+        pairs = []
+        for tag, i1, i2, j1, j2 in sm.get_opcodes():
+            if tag == "equal" or (tag == "replace" and i2 - i1 == j2 - j1):
+                pairs += list(zip(range(i1, i2), range(j1, j2)))
+            else:
+                pairs += [(i, None) for i in range(i1, i2)] + [(None, j) for j in range(j1, j2)]
+        for ti, ri in pairs:
+            bi = ti if ti is not None else ri
+            tb = tp[ti] if ti is not None else Counter()
+            rb = rp[ri] if ri is not None else Counter()
             n = sum(tb.values())
             ok = sum((tb & rb).values())
             total += n
