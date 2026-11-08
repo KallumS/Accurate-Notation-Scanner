@@ -27,11 +27,19 @@ struct Line
 {
     double y, x0, x1;
     std::vector<int> parts;   // segment indices
+    double thickness = 0;     // the thinnest piece
 };
 
 double overlap (const Line& a, const Line& b)
 {
     return std::min (a.x1, b.x1) - std::max (a.x0, b.x0);
+}
+
+// Lines of one staff run side by side, much the same length.
+bool alongside (const Line& a, const Line& b)
+{
+    const double la = a.x1 - a.x0, lb = b.x1 - b.x0;
+    return overlap (a, b) >= 0.8 * std::min (la, lb) && std::min (la, lb) >= 0.5 * std::max (la, lb);
 }
 
 std::vector<Line> horizontalLines (const PageInk& page)
@@ -41,7 +49,7 @@ std::vector<Line> horizontalLines (const PageInk& page)
     {
         const auto& s = page.segments[i];
         if (! s.horizontal (0.005) || s.thickness > 3.0 || s.length() < 2.0) continue;
-        raw.push_back ({ (s.a.y + s.b.y) * 0.5, s.minX(), s.maxX(), { static_cast<int> (i) } });
+        raw.push_back ({ (s.a.y + s.b.y) * 0.5, s.minX(), s.maxX(), { static_cast<int> (i) }, s.thickness });
     }
     std::sort (raw.begin(), raw.end(), [] (const Line& a, const Line& b) {
         if (std::abs (a.y - b.y) > 0.15) return a.y < b.y;
@@ -61,6 +69,7 @@ std::vector<Line> horizontalLines (const PageInk& page)
                 m.x0 = std::min (m.x0, l.x0);
                 m.x1 = std::max (m.x1, l.x1);
                 m.parts.push_back (l.parts.front());
+                m.thickness = std::min (m.thickness, l.thickness);
                 joined = true;
                 break;
             }
@@ -88,7 +97,8 @@ std::vector<Staff> findStaves (const PageInk& page, std::vector<int>& lineSegmen
             const double gap = lines[k].y - lines[i].y;
             if (gap < 1.5) continue;
             if (gap > 25.0) break;
-            if (overlap (lines[i], lines[k]) < 0.6 * std::min (lines[i].x1 - lines[i].x0, lines[k].x1 - lines[k].x0)) continue;
+            if (! alongside (lines[i], lines[k])) continue;
+            if (lines[i].thickness > 0.3 * gap || lines[k].thickness > 0.3 * gap) continue;
 
             size_t found[5] = { i, k, 0, 0, 0 };
             bool ok = true;
@@ -100,7 +110,7 @@ std::vector<Staff> findStaves (const PageInk& page, std::vector<int>& lineSegmen
                 {
                     if (lines[j].y > want + gap * 0.15) break;
                     if (! used[j] && std::abs (lines[j].y - want) <= gap * 0.15
-                        && overlap (lines[i], lines[j]) >= 0.6 * std::min (lines[i].x1 - lines[i].x0, lines[j].x1 - lines[j].x0))
+                        && alongside (lines[i], lines[j]) && lines[j].thickness <= 0.3 * gap)
                     {
                         found[n] = j;
                         ok = true;

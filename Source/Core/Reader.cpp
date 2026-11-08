@@ -1294,7 +1294,12 @@ SystemRead PageReader::readSystem (int systemIndex, std::vector<StaffState>& sta
                     if (frontier - a.x1 > (pass == 0 ? 1.2 : 0.7) * sp) continue;
                     int match = -1;
                     for (int h : it.heads)
-                        if (heads[static_cast<size_t> (h)].line == a.line) match = h;
+                    {
+                        if (heads[static_cast<size_t> (h)].line != a.line) continue;
+                        bool taken = false;   // two heads on one line (B-flat and B) take one each
+                        for (const auto& o : accs) taken = taken || (o.attached && o.head == h);
+                        if (! taken) { match = h; break; }
+                    }
                     if (match < 0) continue;
                     a.attached = true;
                     a.head = match;
@@ -1662,14 +1667,19 @@ SystemRead PageReader::readSystem (int systemIndex, std::vector<StaffState>& sta
                     bar.multiRest = 1;
             if (bar.multiRest)
             {
+                // the H-bar's extent: its number stands centred just above the staff
+                double hx0 = ranges[r].x0, hx1 = ranges[r].x1;
+                for (const auto& sgm : page.segments)
+                    if (sgm.horizontal (0.01) && sgm.thickness > 0.7 * sp && sgm.length() > 2 * sp && std::abs ((sgm.a.y + sgm.b.y) * 0.5 - staff.middle()) < 0.6 * sp
+                        && sgm.minX() >= ranges[r].x0 && sgm.maxX() <= ranges[r].x1) { hx0 = sgm.minX(); hx1 = sgm.maxX(); }
                 std::string number;
                 std::vector<std::pair<double, int>> ds;
                 for (size_t i = 0; i < page.glyphs.size(); ++i)
                 {
                     const auto& g = page.glyphs[i];
                     const int d = timeDigit (g.name);
-                    if (d < 0 || glyphStaff[i] != si || g.box.cx() < ranges[r].x0 || g.box.cx() >= ranges[r].x1) continue;
-                    if (g.box.cy() > staff.top()) continue;
+                    if (d < 0 || glyphStaff[i] != si || g.box.cx() < hx0 - sp || g.box.cx() > hx1 + sp) continue;
+                    if (g.box.cy() > staff.top() || g.box.y1 < staff.top() - 4 * sp) continue;
                     ds.push_back ({ g.box.x0, d });
                     glyphUsed[i] = true;
                 }
@@ -1679,7 +1689,8 @@ SystemRead PageReader::readSystem (int systemIndex, std::vector<StaffState>& sta
                     if (number.empty() && t.box.cx() >= ranges[r].x0 && t.box.cx() < ranges[r].x1 && t.box.cy() < staff.top() && t.box.cy() > staff.top() - 4 * sp
                         && ! t.text.empty() && std::all_of (t.text.begin(), t.text.end(), [] (char c) { return c >= '0' && c <= '9'; }))
                         number = t.text;
-                bar.multiRest = number.empty() ? 1 : std::max (1, std::stoi (number));
+                bar.multiRest = number.empty() || number.size() > 3 ? 1 : std::max (1, std::stoi (number));
+                if (number.empty()) bar.problems.push_back ({ Issue::Warning, "A multi-bar rest without a readable number was read as one bar." });
                 Event e;
                 e.rest = true; e.measureRest = true; e.type = 0; e.duration = length;
                 bar.events.push_back (e);
