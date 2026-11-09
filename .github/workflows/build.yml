@@ -50,6 +50,21 @@ jobs:
           name: window
           path: window.png
 
+  mupdf-from-source:
+    name: MuPDF built from source (Linux), as on the Mac
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Core and tests, with MuPDF compiled from its pinned source
+        run: |
+          cmake -B build-src -G Ninja -DANS_BUILD_APP=OFF -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-src
+          ctest --test-dir build-src --output-on-failure
+      - name: Convert a fixture with the command-line tool
+        run: ./build-src/notation-scan Tests/fixtures/ly_bach_bwv187.7.pdf -o chorale.musicxml && head -c 600 chorale.musicxml
+
   macos:
     name: macOS app
     runs-on: macos-14
