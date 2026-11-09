@@ -38,25 +38,25 @@ So this app reads what the PDF says is there:
 
 ## How accurate
 
-Measured by engraving known music with MuseScore and LilyPond, reading the
-PDFs back and comparing note by note (`tools/corpus.py`):
+Tested on large collections of real music: each piece engraved into a PDF
+by MuseScore, read back by the app, and compared note by note with exactly
+what was printed (pitch with its spelling, onset, length, tie). Full results
+and method: [docs/ACCURACY.md](docs/ACCURACY.md).
 
-| From MuseScore PDFs | Notes read exactly |
-| --- | --- |
-| 40 Bach chorales | 100% |
-| 21 real pieces: string quartets, Lieder, piano rags, choir and piano, a concerto | 97% |
-| 40 random scores built to be awkward (tuplets, two voices, chords, odd meters, double sharps) | 94% |
-| All of them (34,525 notes, 7,017 bars) | 98.5% |
+| Collection | Pieces | Notes | Exactly right |
+| --- | ---: | ---: | ---: |
+| OpenScore Lieder (voice and piano) | 1,332 | 1.47 million | 88.9% |
+| OpenScore String Quartets | 119 movements | 1.37 million | 96.4% |
+| Mozart piano sonatas | 58 movements | 122,000 | 96.4% |
+| Beethoven string quartets | 70 movements | 278,000 | 99.4% |
+| Bach chorales, madrigals, Lieder, quartets, random stress tests | 101 | 35,000 | 98.5% |
+| **All** | **1,680** | **3.27 million** | **93.3%** |
 
-LilyPond PDFs read as well where the PDF is faithful (Bach chorales: 99.7%);
-most of LilyPond's lower scores come from the conversion into LilyPond, not
-from reading.
-
-When a file is reported as "every bar checked out", it matched the original
-in every test but one (a slur between two identical notes, drawn exactly
-like a tie). Of the 116 bars read wrong, 72 were marked for you to look at;
-44 were not - mostly in dense piano writing (ties on chords across a line
-break, rests between the two staves). Closing that gap is the next job.
+Most of what is wrong is marked on the page for you to check (79% of wrong
+bars in the songs, 43-81% elsewhere). What is not marked is mostly ties: the
+notes and rhythms are right, but a slur between two equal notes was read as
+a tie or the other way round - they are drawn the same way. Dense piano
+writing that passes between the two staves is the other weak spot.
 
 ## What it reads
 
