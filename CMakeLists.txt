@@ -32,6 +32,7 @@ add_library(ScannerCore STATIC
     Source/Core/Chords.cpp
     Source/Core/Harmony.cpp
     Source/Core/AutoCC.cpp
+    Source/Core/Instruments.cpp
     Source/Core/Xml.cpp)
 target_include_directories(ScannerCore PUBLIC Source/Core)
 target_link_libraries(ScannerCore PUBLIC mupdf)
@@ -54,7 +55,8 @@ if(ANS_BUILD_TESTS)
         Tests/TestMidi.cpp
         Tests/TestChords.cpp
         Tests/TestHarmony.cpp
-        Tests/TestAutoCC.cpp)
+        Tests/TestAutoCC.cpp
+        Tests/TestInstruments.cpp)
     target_link_libraries(ScannerTests PRIVATE ScannerCore)
     target_compile_definitions(ScannerTests PRIVATE ANS_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/Tests/fixtures")
     add_test(NAME Core COMMAND ScannerTests)

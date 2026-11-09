@@ -108,6 +108,8 @@ TEST ("MuseScore: Bach chorale with horn, BWV 1.6") { checkFixture ("ms_bach_bwv
 TEST ("MuseScore: random score 2") { checkFixture ("ms_random002"); }
 TEST ("MuseScore: random score 5") { checkFixture ("ms_random005"); }
 TEST ("MuseScore: Kinkel, Op. 10 No. 3 (first and second endings)") { checkFixture ("ms_kinkel_op10no3"); }
+TEST ("MuseScore: an orchestra, transposing parts written transposed") { checkFixture ("ms_orchestra_transposed"); }
+TEST ("MuseScore: the same orchestra written at concert pitch") { checkFixture ("ms_orchestra_concert"); }
 TEST ("LilyPond: Monteverdi madrigal") { checkFixture ("ly_monteverdi_madrigal.3.1"); }
 TEST ("LilyPond: Bach chorale BWV 187.7") { checkFixture ("ly_bach_bwv187.7"); }
 
@@ -148,6 +150,38 @@ TEST ("First and second endings are read, MuseScore and LilyPond alike")
     // every part carries them
     for (const auto& part : c.read.score.parts)
         CHECK (part.measures.size() > 29 && part.measures[29].left.ending == Barline::Ending::Start);
+}
+
+TEST ("Instruments are named, and the transposing ones told transposed or at concert pitch from the page")
+{
+    // Each part's transposition (written above sounding) as MuseScore's own
+    // MusicXML of these two engravings gives it (tools/transposingscore.py).
+    const std::vector<std::pair<std::string, int>> transposed {
+        { "picc", -12 }, { "fl", 0 }, { "ob", 0 }, { "cl", 2 }, { "cl", 3 }, { "asax", 9 },
+        { "hn", 7 }, { "tpt", 2 }, { "vln1", 0 }, { "vla", 0 }, { "vc", 0 }, { "cb", 12 } };
+    const std::vector<std::pair<std::string, int>> concert {
+        { "picc", -12 }, { "fl", 0 }, { "ob", 0 }, { "cl", 0 }, { "cl", 0 }, { "asax", 0 },
+        { "hn", 0 }, { "tpt", 0 }, { "vln1", 0 }, { "vla", 0 }, { "vc", 0 }, { "cb", 12 } };
+    for (const auto& [file, want] : { std::make_pair (std::string ("ms_orchestra_transposed.pdf"), transposed),
+                                      std::make_pair (std::string ("ms_orchestra_concert.pdf"), concert) })
+    {
+        const auto c = convertPdf (fixture (file));
+        CHECK_EQ (c.read.score.parts.size(), want.size());
+        for (size_t p = 0; p < std::min (want.size(), c.read.score.parts.size()); ++p)
+        {
+            CHECK_EQ (c.read.score.parts[p].instrument, want[p].first);
+            CHECK_EQ (c.read.score.parts[p].transpose, want[p].second);
+        }
+    }
+    // played at concert pitch: the B-flat clarinet's first written note sounds a tone lower
+    const auto c = convertPdf (fixture ("ms_orchestra_transposed.pdf"));
+    const auto perf = perform (c.read.score);
+    const auto& clarinet = c.read.score.parts[3].measures[0].events.front().notes.front().pitch;
+    for (const auto& n : perf.notes)
+        if (n.part == 3) { CHECK_EQ (n.pitch, midiPitch (clarinet) - 2); break; }
+    // and the MusicXML says so, as Noterator reads it
+    CHECK (c.musicXml.find ("<instrument-name>Clarinet</instrument-name>") != std::string::npos);
+    CHECK (c.musicXml.find ("<chromatic>-2</chromatic>") != std::string::npos);
 }
 
 TEST ("A scanned PDF is refused, with the reason")

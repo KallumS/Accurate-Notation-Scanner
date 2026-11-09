@@ -1,5 +1,7 @@
 #include "Reader.h"
 
+#include "Instruments.h"
+
 #include "Layout.h"
 
 #include <algorithm>
@@ -2711,7 +2713,10 @@ ReadResult readScore (const std::vector<PageInk>& pages)
             {
                 auto& part = parts[static_cast<size_t> (partIndex[k])];
                 const auto name = partNameFrom (read.staffNames[k]);
-                if (part.name.empty() && ! name.empty() && name.size() > 2 && name.back() != '.') part.name = name;
+                // a name, not an abbreviation: a trailing full stop is kept when
+                // the label spells an instrument out ("Violino I.", "Viola.")
+                if (part.name.empty() && ! name.empty() && name.size() > 2 && (name.back() != '.' || instruments::identify (name).fullName))
+                    part.name = name;
             }
 
             std::vector<bool> shown (parts.size(), false);
@@ -2823,6 +2828,98 @@ ReadResult readScore (const std::vector<PageInk>& pages)
             for (size_t b = 0; b < part.measures.size() && ! first.time; ++b)
                 for (const auto& other : parts)
                     if (b < other.measures.size() && other.measures[b].time) { first.time = other.measures[b].time; break; }
+        }
+    }
+
+    // Instruments, from every label each part was printed with, and whether
+    // this page writes the transposing ones transposed: told from the key
+    // signatures (a clarinet in B-flat two sharps above the strings is
+    // written transposed; at the strings' key, at concert pitch), never
+    // assumed.
+    {
+        struct Found { const instruments::Instrument* inst = nullptr; bool keyStated = false; int t = 0; std::string key; };
+        std::vector<Found> found (parts.size());
+        for (size_t p = 0; p < parts.size(); ++p)
+        {
+            std::vector<std::string> labels;
+            if (! parts[p].name.empty()) labels.push_back (parts[p].name);
+            if (p < known.size())
+            {
+                if (! known[p].name.empty()) labels.push_back (known[p].name);
+                for (const auto& a : known[p].aliases) labels.push_back (a);
+            }
+            for (const auto& l : labels)
+            {
+                const auto id = instruments::identify (l);
+                if (id.instrument == nullptr) continue;
+                if (found[p].inst == nullptr || (id.keyStated && ! found[p].keyStated))
+                    found[p] = { id.instrument, id.keyStated, id.transposition, id.keyName };
+            }
+            if (found[p].inst != nullptr) parts[p].instrument = found[p].inst->id;
+        }
+        auto keyOf = [] (const Part& part) -> std::optional<int> {
+            for (const auto& m : part.measures) if (m.key) return m.key;
+            return std::nullopt;
+        };
+        // the concert key: what the parts that do not transpose are written in
+        std::map<int, int> votes;
+        for (size_t p = 0; p < parts.size(); ++p)
+            if (found[p].inst != nullptr && found[p].t % 12 == 0)
+                if (const auto k = keyOf (parts[p])) ++votes[*k];
+        std::optional<int> concert;
+        int most = 0;
+        for (const auto& [k, n] : votes) if (n > most) { most = n; concert = k; }
+        auto mod12 = [] (int x) { return ((x % 12) + 12) % 12; };
+        for (size_t p = 0; p < parts.size(); ++p)
+        {
+            auto& part = parts[p];
+            const auto* inst = found[p].inst;
+            if (inst == nullptr) continue;
+            // The octave (double bass, piccolo, tenor, guitar) is how the part is
+            // written in its usual clef; a clef with an 8 on it has already
+            // moved the notes, and another clef writes them where they sound.
+            part.transpose = 0;
+            if (inst->octave != 0)
+                for (const auto& c : part.measures.empty() ? std::vector<ClefChange> {} : part.measures.front().clefs)
+                    if (c.staff == 1 && c.offset == Fraction (0))
+                    {
+                        const char sign = c.clef.sign == ClefSign::G ? 'G' : c.clef.sign == ClefSign::F ? 'F' : c.clef.sign == ClefSign::C ? 'C' : '?';
+                        if (sign == inst->clef && c.clef.octave == 0) part.transpose = inst->octave;
+                        break;
+                    }
+            if (mod12 (found[p].t) == 0)
+            {
+                part.transpose += found[p].t;
+                if (part.transpose != 0) part.instrumentNote = "written an octave from where it sounds, as it usually is";
+                continue;
+            }
+            const std::string in = found[p].keyStated ? "in " + found[p].key : inst->transposedName + " (not printed: the usual key)";
+            const auto written = keyOf (part);
+            bool transposed = false, concertPitch = false;
+            if (written && concert)
+            {
+                const int diff = *written - *concert;
+                if (mod12 (diff - 7 * found[p].t) == 0) transposed = true;
+                else if (diff == 0) concertPitch = true;
+                else if (*written == 0 && found[p].keyStated && (inst->id == "hn" || inst->id == "tpt"))
+                    transposed = true;   // horns and trumpets written without a key signature, by the old custom
+            }
+            if (transposed)
+            {
+                part.transpose += found[p].t;
+                part.instrumentNote = in + ": written transposed (its key signature against the score's), so it is played at concert pitch";
+            }
+            else if (concertPitch)
+                part.instrumentNote = in + ": written at concert pitch (the score's key signature)";
+            else
+            {
+                part.instrumentNote = in + ": whether it is written transposed could not be told from the key signatures, so it is played as written";
+                const auto& first = part.measures.empty() ? Measure {} : part.measures.front();
+                result.issues.push_back ({ Issue::Info, first.places.empty() ? 0 : first.places.front().page,
+                                           first.places.empty() ? Box {} : first.places.front().box, 0, static_cast<int> (p),
+                                           (part.name.empty() ? inst->name : part.name) + ": whether this part is written transposed (" + in
+                                           + ") could not be told from the key signatures; it is played as written." });
+            }
         }
     }
 

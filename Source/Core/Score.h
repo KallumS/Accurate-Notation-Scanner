@@ -175,6 +175,9 @@ struct Part
 {
     std::string name, abbreviation;
     int staves = 1;
+    std::string instrument;        // Noterator's id ("cl", "hn"), from the printed name; "" when it names none
+    int transpose = 0;             // written minus sounding, in semitones, as this page writes it
+    std::string instrumentNote;    // how that was told, in plain words
     std::vector<Measure> measures;
 };
 

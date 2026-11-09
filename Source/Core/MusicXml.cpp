@@ -1,5 +1,7 @@
 #include "MusicXml.h"
 
+#include "Instruments.h"
+
 #include "Xml.h"
 
 #include <algorithm>
@@ -155,6 +157,17 @@ std::string toMusicXml (const Score& score)
     {
         w.open ("score-part", { { "id", "P" + std::to_string (p + 1) } });
         w.leaf ("part-name", score.parts[p].name.empty() ? "Part " + std::to_string (p + 1) : score.parts[p].name);
+        // the instrument, as Noterator names it, and its General MIDI sound
+        if (const auto* inst = instruments::byId (score.parts[p].instrument))
+        {
+            const std::string id = "P" + std::to_string (p + 1) + "-I1";
+            w.open ("score-instrument", { { "id", id } });
+            w.leaf ("instrument-name", inst->name);
+            w.close();
+            w.open ("midi-instrument", { { "id", id } });
+            w.leaf ("midi-program", inst->program + 1);
+            w.close();
+        }
         w.close();
     }
     w.close();
@@ -205,6 +218,16 @@ std::string toMusicXml (const Score& score)
                 }
                 if (b == 0 && part.staves > 1) w.leaf ("staves", part.staves);
                 for (const auto* c : openingClefs) writeClef (w, c->clef, c->staff, part.staves);
+                // written above sounding: Noterator's <transpose>, as it writes and reads it
+                if (b == 0 && part.transpose != 0)
+                {
+                    const int octaves = part.transpose / 12, rest = part.transpose - 12 * octaves;
+                    w.open ("transpose");
+                    w.leaf ("diatonic", -instruments::diatonicFor (rest));
+                    w.leaf ("chromatic", -rest);
+                    if (octaves != 0) w.leaf ("octave-change", -octaves);
+                    w.close();
+                }
                 if (m.multiRest > 1)
                 {
                     w.open ("measure-style");

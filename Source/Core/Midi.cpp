@@ -1,6 +1,7 @@
 #include "Midi.h"
 
 #include "AutoCC.h"
+#include "Instruments.h"
 
 #include <algorithm>
 #include <cctype>
@@ -189,7 +190,8 @@ Performance perform (const Score& score)
         int ch = static_cast<int> (p % 15);
         if (ch >= 9) ++ch;
         out.channelOfPart.push_back (ch);
-        out.programOfPart.push_back (programFor (score.parts[p].name));
+        const auto* inst = instruments::byId (score.parts[p].instrument);
+        out.programOfPart.push_back (inst != nullptr ? inst->program : programFor (score.parts[p].name));
     }
 
     for (size_t p = 0; p < score.parts.size(); ++p)
@@ -228,7 +230,8 @@ Performance perform (const Score& score)
                 }
                 for (const auto& n : e->notes)
                 {
-                    const int pitch = midiPitch (n.pitch);
+                    // at concert pitch where the page writes the part transposed
+                    const int pitch = std::clamp (midiPitch (n.pitch) - part.transpose, 0, 127);
                     if (n.tieStop && ! e->grace)
                     {
                         auto it = std::find_if (open.begin(), open.end(), [&] (const Open& o) { return o.pitch == pitch && o.staff == e->staff; });
@@ -262,7 +265,12 @@ Performance perform (const Score& score)
     // AutoCC's curves, part by part, for the instruments that sustain.
     for (size_t p = 0; p < score.parts.size(); ++p)
     {
-        const int family = sustainFamily (out.programOfPart[p]);
+        int family = sustainFamily (out.programOfPart[p]);
+        if (const auto* inst = instruments::byId (score.parts[p].instrument))
+        {
+            using S = instruments::Shape;
+            family = inst->shape == S::Strings ? 1 : inst->shape == S::Brass ? 2 : inst->shape == S::Woodwinds ? 3 : inst->shape == S::Neutral ? 4 : 0;
+        }
         if (family == 0) continue;
         autocc::Settings settings;
         settings.preset = family == 1 ? autocc::Preset::Strings : family == 2 ? autocc::Preset::Brass

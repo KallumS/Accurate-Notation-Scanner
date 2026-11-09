@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 
+#include "Instruments.h"
 #include "PdfReader.h"
 #include "Theme.h"
 
@@ -344,14 +345,38 @@ void MainComponent::paint (juce::Graphics& g)
     auto right = bounds.withTrimmedLeft (320);
     if (auto* j = job())
     {
-        auto header = right.removeFromTop (64).reduced (16, 8);
+        auto header = right.removeFromTop (84).reduced (16, 8);
         g.setColour (theme::text);
         g.setFont (font (17, true));
         g.drawText (j->pdf.getFileName(), header.removeFromTop (24), juce::Justification::centredLeft);
         g.setColour (j->done && j->result.verdict == Conversion::Rejected ? theme::warnText : theme::textDim);
         g.setFont (font (14));
+        auto text = header.withTrimmedRight (110);
         g.drawFittedText (j->done ? juce::String::fromUTF8 (j->result.summary().c_str()) : verdictText (*j),
-                          header.withTrimmedRight (110), juce::Justification::topLeft, 2, 1.0f);
+                          text.removeFromTop (20), juce::Justification::topLeft, 1, 1.0f);
+        // who plays: each part's instrument, and how a transposing one is written
+        if (j->done && j->result.verdict != Conversion::Rejected)
+        {
+            juce::StringArray who;
+            const auto& parts = j->result.read.score.parts;
+            for (size_t p = 0; p < parts.size(); ++p)
+            {
+                const auto& part = parts[p];
+                const auto* inst = instruments::byId (part.instrument);
+                juce::String s = juce::String::fromUTF8 ((part.name.empty() ? (inst != nullptr ? inst->name : "Part " + std::to_string (p + 1)) : part.name).c_str());
+                if (inst != nullptr && ! s.containsIgnoreCase (juce::String (inst->name).upToFirstOccurrenceOf (" ", false, false)))
+                    s << " (" << juce::String::fromUTF8 (inst->name.c_str()).toLowerCase() << ")";
+                if (inst == nullptr && ! part.name.empty()) s << " (?)";
+                if (part.transpose % 12 != 0) s << juce::String::fromUTF8 (" \xe2\x80\x93 played at concert pitch");
+                else if (part.instrumentNote.find ("concert pitch") != std::string::npos) s << juce::String::fromUTF8 (" \xe2\x80\x93 written at concert pitch");
+                else if (part.instrumentNote.find ("could not be told") != std::string::npos) s << juce::String::fromUTF8 (" \xe2\x80\x93 played as written");
+                who.add (s);
+            }
+            g.setFont (font (13));
+            g.setColour (theme::textOff);
+            g.drawFittedText (who.joinIntoString (juce::String::fromUTF8 ("  \xc2\xb7  ")), text,
+                              juce::Justification::topLeft, 2, 0.9f);
+        }
         if (j->pages > 0)
         {
             g.setColour (theme::textDim);
@@ -409,7 +434,7 @@ void MainComponent::resized()
     auto left = bounds.removeFromLeft (320);
     fileList.setBounds (left.reduced (10));
 
-    auto header = bounds.removeFromTop (64);
+    auto header = bounds.removeFromTop (84);
     auto nav = header.reduced (16, 8).removeFromTop (24).removeFromRight (56);
     prevPage.setBounds (nav.removeFromLeft (26));
     nav.removeFromLeft (4);
