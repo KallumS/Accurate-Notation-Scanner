@@ -3,6 +3,7 @@
 #include "Layout.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -2028,6 +2029,96 @@ SystemRead PageReader::readSystem (int systemIndex, std::vector<StaffState>& sta
 
 // ===========================================================================
 
+// One part of one system, as it shows: for matching to the score's parts
+// when systems show different staves (empty staves hidden).
+struct SystemPart
+{
+    int staves = 1;
+    std::vector<int> clefs;     // per staff: 0 G, 1 F, 2 C, 3 other, -1 none
+    std::string name;           // the label left of it, full or abbreviated
+    std::vector<std::string> aliases;   // every label it has been seen with
+};
+
+std::string squeeze (const std::string& s)
+{
+    std::string out;
+    for (char c : s)
+        if (std::isalnum (static_cast<unsigned char> (c))) out += static_cast<char> (std::tolower (static_cast<unsigned char> (c)));
+    return out;
+}
+
+// "Pno." and "Piano", "Vc." and "Violoncello": the short one's letters, in
+// order, starting with the same letter.
+bool sameName (const std::string& a, const std::string& b)
+{
+    const auto x = squeeze (a), y = squeeze (b);
+    if (x.empty() || y.empty()) return false;
+    if (x == y) return true;
+    const auto& shortOne = x.size() <= y.size() ? x : y;
+    const auto& longOne = x.size() <= y.size() ? y : x;
+    if (shortOne[0] != longOne[0]) return false;
+    size_t k = 0;
+    for (char c : longOne)
+        if (k < shortOne.size() && c == shortOne[k]) ++k;
+    return k == shortOne.size();
+}
+
+double matchCost (const SystemPart& a, const SystemPart& b)
+{
+    if (a.staves != b.staves) return 50.0;
+    double c = 0.0;
+    for (size_t i = 0; i < a.clefs.size() && i < b.clefs.size(); ++i)
+        if (a.clefs[i] != b.clefs[i]) c += 1.0;   // a clef can change between systems
+    if (! a.name.empty() && ! b.name.empty())
+    {
+        bool same = sameName (a.name, b.name);
+        for (const auto& alias : b.aliases) same = same || sameName (a.name, alias);
+        if (same) return 0.0;
+        c += 2.0;   // "Cello" and "Vc." share no letters: a different name counts, but does not decide
+    }
+    return c;
+}
+
+std::vector<SystemPart> systemParts (const PageInk& page, const PageLayout& layout, const System& sys)
+{
+    std::vector<SystemPart> out;
+    for (size_t k = 0; k < sys.staves.size(); ++k)
+    {
+        if (k == 0 || sys.partOfStaff[k] != sys.partOfStaff[k - 1]) out.push_back ({ 0, {}, {} });
+        auto& part = out.back();
+        ++part.staves;
+        const auto& staff = layout.staves[static_cast<size_t> (sys.staves[k])];
+        int clef = -1;
+        double bestX = 1e9;
+        for (const auto& g : page.glyphs)
+        {
+            if (! isClefName (g.name) || g.box.x0 > staff.x0 + 8 * staff.space || g.box.x0 < staff.x0 - staff.space) continue;
+            if (g.origin.y < staff.top() - staff.space || g.origin.y > staff.bottom() + staff.space) continue;
+            if (g.box.x0 < bestX)
+            {
+                bestX = g.box.x0;
+                clef = g.name.rfind ("gClef", 0) == 0 ? 0 : g.name.rfind ("fClef", 0) == 0 ? 1 : g.name.rfind ("cClef", 0) == 0 ? 2 : 3;
+            }
+        }
+        part.clefs.push_back (clef);
+    }
+    // labels: text left of the part's staves
+    size_t k = 0;
+    for (auto& part : out)
+    {
+        const auto& top = layout.staves[static_cast<size_t> (sys.staves[k])];
+        const auto& bottom = layout.staves[static_cast<size_t> (sys.staves[k + static_cast<size_t> (part.staves) - 1])];
+        std::vector<const Text*> words;
+        for (const auto& t : page.texts)
+            if (t.box.x1 < top.x0 - 0.3 * top.space && t.box.cy() > top.top() - 1.5 * top.space && t.box.cy() < bottom.bottom() + 1.5 * bottom.space)
+                words.push_back (&t);
+        std::sort (words.begin(), words.end(), [] (const Text* a, const Text* b) { return std::abs (a->box.cy() - b->box.cy()) > 2 ? a->box.cy() < b->box.cy() : a->box.x0 < b->box.x0; });
+        for (const auto* t : words) part.name += (part.name.empty() ? "" : " ") + t->text;
+        k += static_cast<size_t> (part.staves);
+    }
+    return out;
+}
+
 PageVerdict judgePage (const PageInk& page, const PageLayout& layout)
 {
     PageVerdict v;
@@ -2078,13 +2169,9 @@ std::string partNameFrom (const std::string& s)
 ReadResult readScore (const std::vector<PageInk>& pages)
 {
     ReadResult result;
-    std::vector<StaffState> state;
-    std::vector<int> staffBase;                 // first state index of each part
-    std::vector<int> stavesOfPart;
-    bool structureKnown = false;
+    std::vector<SystemPart> known;                       // the score's parts, as first seen
+    std::vector<std::vector<StaffState>> partState;      // per part, per staff
     int globalBar = 0;
-
-    struct PartBars { std::vector<Measure> measures; };
     std::vector<Part>& parts = result.score.parts;
 
     for (const auto& page : pages)
@@ -2135,51 +2222,132 @@ ReadResult readScore (const std::vector<PageInk>& pages)
         for (size_t s = 0; s < layout.systems.size(); ++s)
         {
             const auto& sys = layout.systems[s];
-            if (! structureKnown)
+
+            // This system's parts: how many staves, their clefs, their label.
+            std::vector<SystemPart> here = systemParts (page, layout, sys);
+            if (std::getenv ("ANS_DEBUG_PARTS") != nullptr)
             {
-                stavesOfPart.assign (static_cast<size_t> (sys.parts), 0);
-                for (int p : sys.partOfStaff) ++stavesOfPart[static_cast<size_t> (p)];
-                int base = 0;
-                for (int n : stavesOfPart) { staffBase.push_back (base); base += n; }
-                state.assign (static_cast<size_t> (base), StaffState {});
-                parts.assign (static_cast<size_t> (sys.parts), Part {});
-                for (size_t p = 0; p < parts.size(); ++p) parts[p].staves = stavesOfPart[p];
-                structureKnown = true;
+                std::fprintf (stderr, "page %d system %zu:", page.number + 1, s);
+                for (const auto& h : here) std::fprintf (stderr, " [%d staves, clef %d, '%s']", h.staves, h.clefs.empty() ? -9 : h.clefs[0], h.name.c_str());
+                std::fprintf (stderr, "\n");
             }
 
-            // Which part and staff each staff of this system is.
-            std::vector<int> stateIndex, partIndex, staffInPart;
-            const bool sameShape = sys.parts == static_cast<int> (parts.size()) && [&] {
-                std::vector<int> count (static_cast<size_t> (sys.parts), 0);
-                for (int p : sys.partOfStaff) ++count[static_cast<size_t> (p)];
-                return count == stavesOfPart;
-            }();
+            // Match them to the score's parts: by label where there is one,
+            // then by staves and clefs, in order. A part new to the score
+            // (shown only once it plays) is added where it stands.
+            std::vector<int> partOf (here.size(), -1);
             {
-                std::vector<int> seen (parts.size() + 8, 0);
-                for (size_t k = 0; k < sys.staves.size(); ++k)
+                const size_t n = here.size(), mCount = known.size();
+                const double inf = 1e9;
+                std::vector<std::vector<double>> cost (n + 1, std::vector<double> (mCount + 1, inf));
+                std::vector<std::vector<int>> step (n + 1, std::vector<int> (mCount + 1, 0));
+                cost[0][0] = 0;
+                for (size_t i = 0; i <= n; ++i)
+                    for (size_t j = 0; j <= mCount; ++j)
+                    {
+                        if (cost[i][j] >= inf) continue;
+                        if (i < n && j < mCount)
+                        {
+                            const double c = cost[i][j] + matchCost (here[i], known[j]);
+                            if (c < cost[i + 1][j + 1]) { cost[i + 1][j + 1] = c; step[i + 1][j + 1] = 1; }
+                        }
+                        if (i < n && cost[i][j] + 3.0 < cost[i + 1][j]) { cost[i + 1][j] = cost[i][j] + 3.0; step[i + 1][j] = 2; }      // new part
+                        if (j < mCount && cost[i][j] + 0.2 < cost[i][j + 1]) { cost[i][j + 1] = cost[i][j] + 0.2; step[i][j + 1] = 3; } // part not shown
+                    }
+                std::vector<std::pair<int, int>> path;
+                for (size_t i = n, j = mCount; i > 0 || j > 0;)
                 {
-                    int p = sameShape ? sys.partOfStaff[k] : std::min (static_cast<int> (k), static_cast<int> (parts.size()) - 1);
-                    int inPart = sameShape ? seen[static_cast<size_t> (p)]++ : 0;
-                    if (inPart >= stavesOfPart[static_cast<size_t> (p)]) inPart = stavesOfPart[static_cast<size_t> (p)] - 1;
-                    partIndex.push_back (p);
-                    staffInPart.push_back (inPart);
-                    stateIndex.push_back (staffBase[static_cast<size_t> (p)] + inPart);
+                    const int st = step[i][j];
+                    if (st == 1) { path.push_back ({ static_cast<int> (i - 1), static_cast<int> (j - 1) }); --i; --j; }
+                    else if (st == 2) { path.push_back ({ static_cast<int> (i - 1), -1 }); --i; }
+                    else { --j; }
+                }
+                std::reverse (path.begin(), path.end());
+                // insert new parts, keeping order
+                int lastMatched = -1;
+                int inserted = 0;
+                for (auto& [i, j] : path)
+                {
+                    if (j >= 0) { partOf[static_cast<size_t> (i)] = j + inserted; lastMatched = j + inserted; continue; }
+                    const int at = lastMatched + 1;
+                    known.insert (known.begin() + at, here[static_cast<size_t> (i)]);
+                    partState.insert (partState.begin() + at, std::vector<StaffState> (static_cast<size_t> (here[static_cast<size_t> (i)].staves)));
+                    Part fresh;
+                    fresh.staves = here[static_cast<size_t> (i)].staves;
+                    for (int b = 0; b < globalBar; ++b)
+                    {
+                        Measure m;
+                        m.number = std::to_string (b + 1);
+                        m.notShown = true;
+                        if (! parts.empty()) { m.left = parts.front().measures[static_cast<size_t> (b)].left; m.hasLeft = parts.front().measures[static_cast<size_t> (b)].hasLeft; m.right = parts.front().measures[static_cast<size_t> (b)].right; }
+                        fresh.measures.push_back (m);
+                    }
+                    parts.insert (parts.begin() + at, fresh);
+                    for (auto& is : result.issues) if (is.part >= at) ++is.part;
+                    partOf[static_cast<size_t> (i)] = at;
+                    lastMatched = at;
+                    ++inserted;
+                }
+                // a known part remembers every label it is seen with
+                for (size_t i = 0; i < n; ++i)
+                {
+                    if (partOf[i] < 0 || here[i].name.empty()) continue;
+                    auto& k = known[static_cast<size_t> (partOf[i])];
+                    if (k.name.empty()) k.name = here[i].name;
+                    else if (std::find (k.aliases.begin(), k.aliases.end(), here[i].name) == k.aliases.end()) k.aliases.push_back (here[i].name);
                 }
             }
-            if (! sameShape)
-                result.issues.push_back ({ Issue::Error, page.number, { sys.x0, layout.staves[static_cast<size_t> (sys.staves.front())].top(), sys.x1,
+
+            // Ambiguous: a part not shown here could have been one that is.
+            bool ambiguous = false;
+            for (size_t j = 0; j < known.size(); ++j)
+            {
+                if (std::find (partOf.begin(), partOf.end(), static_cast<int> (j)) != partOf.end()) continue;
+                for (size_t i = 0; i < here.size(); ++i)
+                    if (here[i].name.empty() && known[j].name.empty() && matchCost (here[i], known[j]) < 0.01) ambiguous = true;
+            }
+            if (ambiguous)
+                result.issues.push_back ({ Issue::Warning, page.number, { sys.x0, layout.staves[static_cast<size_t> (sys.staves.front())].top(), sys.x1,
                                             layout.staves[static_cast<size_t> (sys.staves.back())].bottom() }, globalBar, -1,
-                                          "This system has a different set of staves from the first one (hidden empty staves?); its staves were matched to parts in order, which may be wrong." });
+                                          "Some parts are not shown in this system and the staves have no names; they were matched to parts by clef and order, which may be wrong." });
 
-            auto read = reader.readSystem (static_cast<int> (s), state, stateIndex);
+            // Each staff: its part and its place in it.
+            std::vector<int> partIndex, staffInPart;
+            {
+                std::vector<int> seen (known.size(), 0);
+                size_t staffK = 0;
+                for (size_t i = 0; i < here.size(); ++i)
+                    for (int st = 0; st < here[i].staves; ++st, ++staffK)
+                    {
+                        const int p = partOf[i];
+                        int inPart = seen[static_cast<size_t> (p)]++;
+                        if (inPart >= parts[static_cast<size_t> (p)].staves) inPart = parts[static_cast<size_t> (p)].staves - 1;
+                        partIndex.push_back (p);
+                        staffInPart.push_back (inPart);
+                    }
+            }
 
-            if (globalBar == 0)
-                for (size_t k = 0; k < sys.staves.size(); ++k)
-                {
-                    auto& part = parts[static_cast<size_t> (partIndex[k])];
-                    const auto name = partNameFrom (read.staffNames[k]);
-                    if (part.name.empty() && ! name.empty()) part.name = name;
-                }
+            // Read, with each staff's running state.
+            std::vector<StaffState> flat;
+            std::vector<int> flatIndex;
+            for (size_t k = 0; k < sys.staves.size(); ++k)
+            {
+                flat.push_back (partState[static_cast<size_t> (partIndex[k])][static_cast<size_t> (staffInPart[k])]);
+                flatIndex.push_back (static_cast<int> (k));
+            }
+            auto read = reader.readSystem (static_cast<int> (s), flat, flatIndex);
+            for (size_t k = 0; k < sys.staves.size(); ++k)
+                partState[static_cast<size_t> (partIndex[k])][static_cast<size_t> (staffInPart[k])] = flat[k];
+
+            for (size_t k = 0; k < sys.staves.size(); ++k)
+            {
+                auto& part = parts[static_cast<size_t> (partIndex[k])];
+                const auto name = partNameFrom (read.staffNames[k]);
+                if (part.name.empty() && ! name.empty() && name.size() > 2 && name.back() != '.') part.name = name;
+            }
+
+            std::vector<bool> shown (parts.size(), false);
+            for (int p : partIndex) shown[static_cast<size_t> (p)] = true;
 
             for (int b = 0; b < read.bars; ++b)
             {
@@ -2190,6 +2358,7 @@ ReadResult readScore (const std::vector<PageInk>& pages)
                     m.left = read.leftBar[static_cast<size_t> (b)];
                     m.hasLeft = read.hasLeft[static_cast<size_t> (b)];
                     m.right = read.rightBar[static_cast<size_t> (b)];
+                    m.notShown = ! shown[p];
                     parts[p].measures.push_back (m);
                 }
                 for (size_t k = 0; k < sys.staves.size(); ++k)
@@ -2227,6 +2396,31 @@ ReadResult readScore (const std::vector<PageInk>& pages)
                     m.clefs.insert (m.clefs.begin(), c);
                 }
         }
+    }
+
+    // A part that starts later (or is hidden at first) still needs its
+    // clef, key and time at its first bar.
+    for (auto& part : parts)
+    {
+        if (part.measures.empty() || parts.empty()) continue;
+        auto& first = part.measures.front();
+        for (int st = 1; st <= part.staves; ++st)
+        {
+            bool has = false;
+            for (const auto& c : first.clefs) has = has || (c.staff == st && c.offset == Fraction (0));
+            if (has) continue;
+            for (const auto& m : part.measures)
+            {
+                bool found = false;
+                for (const auto& c : m.clefs)
+                    if (c.staff == st) { ClefChange cc = c; cc.offset = Fraction (0); first.clefs.insert (first.clefs.begin(), cc); found = true; break; }
+                if (found) break;
+            }
+        }
+        if (! first.key)
+            for (const auto& m : part.measures) if (m.key) { first.key = m.key; break; }
+        if (! first.time)
+            for (const auto& m : parts.front().measures) if (m.time) { first.time = m.time; break; }
     }
 
     // A multi-bar rest stands for that many bars (the same in every part).
@@ -2427,6 +2621,17 @@ ReadResult readScore (const std::vector<PageInk>& pages)
                     hasEvents = true;
                     auto& end = voiceEnd[{ e.staff, e.voice }];
                     if (e.offset + e.duration > end) end = e.offset + e.duration;
+                }
+                if (! hasEvents && m.notShown)
+                {
+                    // the part was not shown in this system: it rests
+                    for (int st = 1; st <= parts[p].staves; ++st)
+                    {
+                        Event e;
+                        e.rest = true; e.measureRest = true; e.type = 0; e.duration = length; e.staff = st;
+                        m.events.push_back (e);
+                    }
+                    continue;
                 }
                 if (! hasEvents)
                 {

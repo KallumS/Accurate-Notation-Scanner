@@ -53,7 +53,7 @@ ExternalProject_Add(mupdf_build
     PREFIX ${CMAKE_BINARY_DIR}/mupdf
     SOURCE_DIR ${MUPDF_SRC}
     DOWNLOAD_COMMAND
-        sh -c "[ -f '${MUPDF_SRC}/Makefile' ] || git clone --quiet --depth 1 --branch ${ANS_MUPDF_TAG} --recurse-submodules --shallow-submodules https://github.com/ArtifexSoftware/mupdf.git '${MUPDF_SRC}'"
+        sh -c "[ -f '${MUPDF_SRC}/Makefile' ] || { rm -rf '${MUPDF_SRC}' && git clone --quiet --depth 1 --branch ${ANS_MUPDF_TAG} --recurse-submodules --shallow-submodules https://github.com/ArtifexSoftware/mupdf.git '${MUPDF_SRC}'; }"
     UPDATE_COMMAND ""
     CONFIGURE_COMMAND ""
     BUILD_IN_SOURCE 1

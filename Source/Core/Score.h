@@ -158,6 +158,7 @@ struct Measure
     Barline left, right;
     bool hasLeft = false;
     int multiRest = 0;             // the first bar of a multi-bar rest: how many bars
+    bool notShown = false;         // the part's staves were hidden in this system
     std::vector<PlaceOnPage> places;
 };
 
