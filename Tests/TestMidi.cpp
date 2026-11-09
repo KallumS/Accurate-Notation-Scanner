@@ -167,11 +167,13 @@ ans::Score violinAndPiano (const char* dynamic)
 }
 } // namespace
 
-TEST ("Playback: a violin gets AutoCC's string curves from its dynamic; a piano gets none")
+TEST ("Playback: a violin gets AutoCC's string curves; a piano gets none")
 {
-    // AutoCC strings: CC1 starts at 85 and swells by 31; CC7 is held at 94.
-    // f is 14 above mf in the app's dynamics (velocity 92 against 78), which
-    // moves where CC1 starts and leaves the swell's size alone.
+    // AutoCC strings: CC1 starts at 85 and swells by 31, scaled 10% by
+    // velocity (f is velocity 92): 85 + 31 * (0.9 + 0.1 * 92 / 127) = 115.2.
+    // CC7 is held at 94. As in Noterator, the printed dynamic reaches AutoCC
+    // only through velocity. (This test first moved AutoCC's start by the
+    // dynamic, 99 and 126: the user asked for Noterator's way on 2026-11-09.)
     const auto perf = perform (violinAndPiano ("f"));
     int firstCC1 = -1, topCC1 = -1, pianoControls = 0, cc7 = 0;
     for (const auto& c : perf.controls)
@@ -181,17 +183,44 @@ TEST ("Playback: a violin gets AutoCC's string curves from its dynamic; a piano 
         if (c.controller == 1) topCC1 = std::max (topCC1, c.value);
         if (c.controller == 7) { ++cc7; CHECK_EQ (c.value, 94); }
     }
-    CHECK_EQ (firstCC1, 85 + 14);
-    // the top: AutoCC caps a level at 127 (116 + 14 is 130), and velocity
-    // scales the swell by 10%: 99 + (127 - 99) * (0.9 + 0.1 * 92 / 127) = 126.2.
-    // (This first expected 85 + 14 + 31, forgetting both - corrected 2026-11-09.)
-    CHECK_EQ (topCC1, 126);
+    CHECK_EQ (firstCC1, 85);
+    CHECK_EQ (topCC1, 115);
     CHECK_EQ (cc7, 1);
     CHECK_EQ (pianoControls, 0);
-    // with no dynamic printed, the preset's own start
-    const auto plain = perform (violinAndPiano (nullptr));
-    for (const auto& c : plain.controls)
-        if (c.controller == 1) { CHECK_EQ (c.value, 85); break; }
+}
+
+TEST ("Playback: notes written end to end let go, and AutoCC carries the line on (as Noterator)")
+{
+    // Four quarter notes at a second each. Each is its own key, so between
+    // them every key is up for an instant; the next starts within AutoCC's
+    // 0.4 s, so the line is carried on: the lane holds the level the first
+    // note reached and does not swell again, until the last key goes up.
+    ans::Score s;
+    s.quartersPerMinute = 60;
+    s.parts.resize (1);
+    s.parts[0].name = "Violin";
+    s.parts[0].measures.resize (1);
+    s.parts[0].measures[0].time = ans::TimeSignature {};
+    for (int k = 0; k < 4; ++k)
+    {
+        ans::Event e;
+        e.offset = ans::Fraction (k);
+        e.duration = ans::Fraction (1);
+        ans::Note n;
+        n.pitch = { k, 4, 0 };
+        e.notes.push_back (n);
+        s.parts[0].measures[0].events.push_back (e);
+    }
+    const auto perf = perform (s);
+    auto cc1At = [&] (double quarters) {
+        int v = -1;
+        for (const auto& c : perf.controls) if (c.controller == 1 && c.start <= quarters + 1e-9) v = c.value;
+        return v;
+    };
+    CHECK (cc1At (0.9) > 85 && cc1At (0.9) < 115);   // rising through the first note
+    CHECK_EQ (cc1At (1.5), cc1At (1.0));               // then held, not swelling again
+    CHECK_EQ (cc1At (3.9), cc1At (1.0));
+    CHECK_EQ (cc1At (5.2), 85);                         // back to the floor a second after the last key
 }
 
 TEST ("The MIDI file carries the curves in the violin's track")

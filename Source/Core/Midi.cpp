@@ -220,7 +220,6 @@ Performance perform (const Score& score)
                         if (v > 0) velocityOfStaff[d.staff] = v;
                     }
                 const int velocity = velocityOfStaff.count (e->staff) ? velocityOfStaff[e->staff] : 80;
-                const int dynamicLevel = velocityOfStaff.count (e->staff) ? velocityOfStaff[e->staff] - velocityFor ("mf") : 0;
                 double start = barT + e->offset.value();
                 double length = e->duration.value();
                 if (e->grace)
@@ -252,7 +251,6 @@ Performance perform (const Score& score)
                     pn.length = std::max (0.05, length * (e->grace ? 1.0 : 0.95));
                     pn.written = std::max (0.05, length);
                     pn.velocity = velocity;
-                    pn.dynamic = dynamicLevel;
                     pn.bar = static_cast<int> (b);
                     out.notes.push_back (pn);
                     if (n.tieStart && ! e->grace) open.push_back ({ out.notes.size() - 1, pitch, e->staff });
@@ -275,34 +273,18 @@ Performance perform (const Score& score)
         autocc::Settings settings;
         settings.preset = family == 1 ? autocc::Preset::Strings : family == 2 ? autocc::Preset::Brass
                         : family == 3 ? autocc::Preset::Woodwinds : autocc::Preset::Default;
-        // AutoCC's gesture is first key down to last key up, and in its
-        // Legato mode only those two moments act. Notes written joined (each
-        // starting before the line before it has ended) are one gesture, as a
-        // player overlapping the keys would give it; a rest ends it. So one key
-        // per gesture, with the first note's velocity, is exactly what AutoCC
-        // would make of the line played legato.
+        // As Noterator does (its AutoCC.cpp and Perform.cpp): every written
+        // note is a key of its own, held for its written length; at one
+        // instant the key-ups go first, so notes written end to end let go
+        // and the line is carried on by AutoCC's 0.4 s rule. Dynamic stays at
+        // AutoCC's 0: printed dynamics reach it through velocity.
         std::vector<autocc::KeyEvent> keys;
-        int lastDynamic = 0;
-        double gestureEnd = -1;
         for (const auto& n : out.notes)
         {
             if (n.part != static_cast<int> (p)) continue;
-            const double on = out.seconds (n.start), off = out.seconds (n.start + n.written);
-            if (keys.empty() || on > gestureEnd + 1e-6)
-            {
-                if (! keys.empty()) keys.push_back ({ gestureEnd, 60, 0, false });
-                keys.push_back ({ on, 60, n.velocity, true });
-                gestureEnd = off;
-            }
-            else
-                gestureEnd = std::max (gestureEnd, off);
-            if (n.dynamic != lastDynamic || settings.dynamic.empty())
-            {
-                settings.dynamic.push_back ({ on, std::clamp (n.dynamic, -64, 64) });
-                lastDynamic = n.dynamic;
-            }
+            keys.push_back ({ out.seconds (n.start), n.pitch, n.velocity, true });
+            keys.push_back ({ out.seconds (n.start + n.written), n.pitch, 0, false });
         }
-        if (! keys.empty()) keys.push_back ({ gestureEnd, 60, 0, false });
         if (keys.empty()) continue;
         for (const auto& c : autocc::render (keys, settings))
             out.controls.push_back ({ static_cast<int> (p), out.channelOfPart[p], out.quarters (c.seconds), c.cc, c.value });

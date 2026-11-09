@@ -13,11 +13,10 @@
     Dynamics set the loudness from where they stand.
 
     Sustaining instruments (strings, brass, woodwinds, voices) get AutoCC's
-    controller curves (AutoCC.h): each line's notes swell and fall on CC1,
-    CC11, CC7 and CC21, shaped for the family, starting from the printed
-    dynamic. The MIDI file carries all four lanes, for sample libraries; the
-    Mac's General MIDI sounds are sent CC11 and CC7 only, since there CC1
-    is vibrato rather than loudness (decision 0012).
+    controller curves (AutoCC.h), fed as Noterator feeds them: every written
+    note a key of its own, for its written length. The MIDI file carries
+    CC1, CC11, CC7 and CC21, for sample libraries; the Mac's General MIDI
+    sounds get CC11 and CC7 only, since there CC1 is vibrato (decision 0012).
 */
 
 #pragma once
@@ -41,7 +40,6 @@ struct PlayedNote
     double written = 1;      // as written, ties joined
     int velocity = 80;
     int bar = 0;             // index of the score's bar it starts in
-    int dynamic = 0;         // the printed dynamic as AutoCC's Dynamic: mf 0, f +14, p -24...
 };
 
 struct PlayedControl

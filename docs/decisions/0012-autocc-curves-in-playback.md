@@ -1,7 +1,8 @@
 # 0012 - AutoCC's controller curves in playback and MIDI export
 
 - **Date:** 2026-11-09
-- **Status:** Accepted (adds to 0008)
+- **Status:** Accepted (adds to 0008); how notes are fed changed the same
+  day, at the user's request, to Noterator's way (below)
 
 ## Context
 
@@ -36,3 +37,16 @@ CC21 aux, with per-family shapes fitted to Lorne Balfe's mock-ups.
   REAPER uses; `tools/autocc/`): 1,300 random note sequences - lines,
   chords, overlaps, gaps either side of 0.4 s, every preset, several
   Dynamic settings - give exactly the same CC values at the same samples.
+
+## Changed (2026-11-09): fed as Noterator feeds it
+
+The user asked for the app to work as Noterator does. Every written note is
+now a key of its own for its written length (Noterator's `AutoCC.cpp` and
+`Perform.cpp`), so notes written end to end let go and AutoCC's 0.4 s rule
+carries the line on at the level the first note reached; and the printed
+dynamic is no longer AutoCC's Dynamic - it reaches AutoCC through velocity
+only, as in Noterator. The two points above about gestures of joined notes
+and the dynamic table are replaced by this. The engine itself is unchanged
+and still matches the JSFX sample for sample; Noterator's port samples
+every 10 ms, so values can land a few milliseconds apart between the two
+apps, never differently shaped.

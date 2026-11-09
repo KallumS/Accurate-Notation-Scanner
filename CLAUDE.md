@@ -103,9 +103,8 @@ ANS_DEBUG_TIES=1  build-core/notation-scan x.pdf --stdout -q    # every curve an
   the app's Chords button; never written into the MusicXML.
 - AutoCC's curves in playback and MIDI export (0012): the port matches
   AutoCC.jsfx run through ysfx exactly, sample for sample, on 1,300 random
-  note sequences (`tools/autocc/build.sh`, then `compare.py`). Noterator
-  has its own AutoCC port that releases between written notes; this app
-  gives AutoCC one gesture per run of joined notes - worth reconciling.
+  note sequences (`tools/autocc/build.sh`, then `compare.py`). Notes are fed
+  as Noterator feeds them (each written note its own key; Dynamic 0).
 - Instruments from part names, transposition from key signatures (0013):
   96/96 parts right on `tools/transposingscore.py` engravings.
 - The Mac CI job is cancelled by GitHub before it starts (account's Mac
