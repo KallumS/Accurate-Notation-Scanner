@@ -116,6 +116,41 @@ void PagePreview::paint (juce::Graphics& g)
         g.fillRect (r);
     }
 
+    // The chords each bar outlines, above its first staff.
+    if (chords && ! job->result.read.score.parts.empty())
+    {
+        const auto& score = job->result.read.score;
+        g.setFont (font (13, true));
+        for (const auto& ch : job->chords)
+        {
+            const auto& m = score.parts.front().measures[static_cast<size_t> (ch.bar)];
+            // the first part shown on this page in this bar holds the place
+            const PlaceOnPage* place = nullptr;
+            for (const auto& part : score.parts)
+            {
+                if (static_cast<size_t> (ch.bar) >= part.measures.size()) continue;
+                for (const auto& pl : part.measures[static_cast<size_t> (ch.bar)].places)
+                    if (pl.page == page && (place == nullptr || pl.box.y0 < place->box.y0)) place = &pl;
+            }
+            if (place == nullptr) continue;
+            Fraction length;
+            for (const auto& part : score.parts)
+                if (static_cast<size_t> (ch.bar) < part.measures.size())
+                    for (const auto& e : part.measures[static_cast<size_t> (ch.bar)].events)
+                        if (! e.grace && e.offset + e.duration > length) length = e.offset + e.duration;
+            if (length <= Fraction (0) && m.time) length = m.time->length();
+            const double share = length > Fraction (0) ? (ch.offset / length).value() : 0.0;
+            const auto text = juce::String::fromUTF8 (ch.name.c_str());
+            const float x = area.getX() + static_cast<float> ((place->box.x0 + share * place->box.width()) * scale) + 3.0f;
+            const float y = area.getY() + static_cast<float> (place->box.y0 * scale) - 18.0f;
+            const float w = juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), text) + 8.0f;
+            g.setColour (theme::ink.withAlpha (0.88f));
+            g.fillRoundedRectangle (x, y, w, 17.0f, 4.0f);
+            g.setColour (theme::text);
+            g.drawText (text, juce::Rectangle<float> (x, y, w, 17.0f), juce::Justification::centred, false);
+        }
+    }
+
     // The bars that need a look.
     const auto& issues = job->result.read.issues;
     for (size_t i = 0; i < issues.size(); ++i)
@@ -156,6 +191,10 @@ MainComponent::MainComponent()
     playButton.setTooltip ("Play the score through the Mac's built-in instruments (Space)");
     midiButton.setTooltip ("Save the chosen score as a MIDI file");
     playButton.onClick = [this] { togglePlay(); };
+    chordsButton.setClickingTogglesState (true);
+    chordsButton.setTooltip ("Name the chords each bar outlines, above the bar (an analysis of the notes, not read from the page)");
+    chordsButton.onClick = [this] { preview.showChords (chordsButton.getToggleState()); };
+    addAndMakeVisible (chordsButton);
     midiButton.onClick = [this] { exportMidi(); };
     addAndMakeVisible (fileList);
     addAndMakeVisible (issueList);
@@ -222,6 +261,7 @@ void MainComponent::addFiles (const juce::StringArray& paths)
         juce::Component::SafePointer<MainComponent> safe (this);
         pool.addJob ([j, safe] {
             j->result = convertPdf (j->pdf.getFullPathName().toStdString());
+            if (j->result.verdict != Conversion::Rejected) j->chords = outlineChords (j->result.read.score);
             j->pages = pageCount (j->pdf.getFullPathName().toStdString());
             j->done = true;
             juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->refresh(); });
@@ -355,6 +395,8 @@ void MainComponent::resized()
     top.removeFromLeft (8);
     if (noteratorButton.isVisible()) noteratorButton.setBounds (top.removeFromLeft (150));
     playButton.setBounds (top.removeFromRight (90));
+    top.removeFromRight (8);
+    chordsButton.setBounds (top.removeFromRight (90));
 
     const bool empty = jobs.isEmpty();
     fileList.setVisible (! empty);

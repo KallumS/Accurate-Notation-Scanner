@@ -5,11 +5,16 @@
 //   notation-scan score.pdf --report r.json  also writes the report
 //   notation-scan score.pdf --midi s.mid     also writes a MIDI file
 //   notation-scan score.pdf --stdout         prints the MusicXML
+//   notation-scan score.pdf --chords c.txt   also writes the chords each bar
+//                                            outlines ("-" prints them), one
+//                                            line per bar: number, then
+//                                            onset:name in quarter notes
 //
 // Exit status: 0 every bar checked out, 1 converted with things to look at,
 // 2 not converted (a scan, no music, or not a PDF).
 
 #include "Convert.h"
+#include "Harmony.h"
 #include "Midi.h"
 
 #include <cstdio>
@@ -19,7 +24,7 @@
 
 int main (int argc, char** argv)
 {
-    std::string input, output, report, midi;
+    std::string input, output, report, midi, chords;
     bool toStdout = false, quiet = false;
     for (int i = 1; i < argc; ++i)
     {
@@ -27,11 +32,12 @@ int main (int argc, char** argv)
         if ((a == "-o" || a == "--output") && i + 1 < argc) output = argv[++i];
         else if (a == "--report" && i + 1 < argc) report = argv[++i];
         else if (a == "--midi" && i + 1 < argc) midi = argv[++i];
+        else if (a == "--chords" && i + 1 < argc) chords = argv[++i];
         else if (a == "--stdout") toStdout = true;
         else if (a == "-q" || a == "--quiet") quiet = true;
         else if (a == "-h" || a == "--help")
         {
-            std::printf ("usage: notation-scan score.pdf [-o out.musicxml] [--report report.json] [--midi out.mid] [--stdout] [-q]\n");
+            std::printf ("usage: notation-scan score.pdf [-o out.musicxml] [--report report.json] [--midi out.mid] [--chords out.txt|-] [--stdout] [-q]\n");
             return 0;
         }
         else input = a;
@@ -58,6 +64,25 @@ int main (int argc, char** argv)
         return 2;
     }
     if (! midi.empty()) std::ofstream (midi, std::ios::binary) << ans::toMidiFile (c.read.score, ans::perform (c.read.score));
+    if (! chords.empty())
+    {
+        std::string text;
+        int bar = -1;
+        const auto& measures = c.read.score.parts.front().measures;
+        for (const auto& ch : ans::outlineChords (c.read.score))
+        {
+            if (ch.bar != bar)
+            {
+                if (bar >= 0) text += "\n";
+                bar = ch.bar;
+                text += "bar " + std::to_string (bar + 1) + " (" + measures[static_cast<size_t> (bar)].number + "):";
+            }
+            text += " " + ch.offset.str() + ":" + ch.name;
+        }
+        if (bar >= 0) text += "\n";
+        if (chords == "-") std::fwrite (text.data(), 1, text.size(), stdout);
+        else std::ofstream (chords) << text;
+    }
     if (toStdout) std::fwrite (c.musicXml.data(), 1, c.musicXml.size(), stdout);
     else std::ofstream (output, std::ios::binary) << c.musicXml;
 

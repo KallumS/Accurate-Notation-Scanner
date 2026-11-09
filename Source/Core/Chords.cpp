@@ -385,8 +385,12 @@ Scale Scale::majorKeyOf (int fifths)
     return named (keys[fifths + 7], "Major");
 }
 
-std::string name (const std::vector<int>& midiNotes, const Scale& keyScale)
+namespace
 {
+// name() and cost() together: ScaleView's detectChord.
+std::string read (const std::vector<int>& midiNotes, const Scale& keyScale, int* costOut)
+{
+    if (costOut != nullptr) *costOut = -1;
     if (midiNotes.empty()) return {};
     const auto key = viewOf (keyScale);
     bool classes[12] = {};
@@ -444,9 +448,20 @@ std::string name (const std::vector<int>& midiNotes, const Scale& keyScale)
             || (r.cost == best.cost && fit == best.fit && slash == best.slash && r.rank < best.rank))
             best = { root, r.name, r.cost, r.rank, fit, slash };
     }
+    if (costOut != nullptr) *costOut = best.cost;
     std::string out = chordNoteName (key, best.root) + best.name;
     if (! rootPosition (best.root)) out += "/" + chordNoteName (key, bass);
     return out;
+}
+} // namespace
+
+std::string name (const std::vector<int>& midiNotes, const Scale& key) { return read (midiNotes, key, nullptr); }
+
+int cost (const std::vector<int>& midiNotes, const Scale& key)
+{
+    int c = -1;
+    read (midiNotes, key, &c);
+    return c;
 }
 
 bool isChordSymbol (const std::string& name)

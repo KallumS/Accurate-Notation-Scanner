@@ -48,6 +48,10 @@ struct Scale
 // different notes are a cluster and read out as note names too.
 std::string name (const std::vector<int>& midiNotes, const Scale& key = {});
 
+// What ScaleView's reader charged for the reading name() chose: lower is a
+// plainer chord. Only for three to seven different notes; -1 otherwise.
+int cost (const std::vector<int>& midiNotes, const Scale& key = {});
+
 // True when name() gave a chord symbol rather than a list of notes.
 bool isChordSymbol (const std::string& name);
 
