@@ -15,7 +15,7 @@ Results go to OUT/results.jsonl (one line per piece) and a summary is
 printed: notes matched, bars identical, and - the number that matters
 most (decision 0002) - bars that were wrong but not marked.
 """
-import argparse, glob, json, os, shutil, subprocess, sys, tempfile, threading, warnings
+import argparse, glob, json, os, re, shutil, subprocess, sys, tempfile, threading, warnings
 from concurrent.futures import ThreadPoolExecutor
 warnings.filterwarnings("ignore")
 
@@ -274,6 +274,12 @@ def engrave_lilypond(args):
         shutil.copy(f, src)
         # bring old syntax up to date, then engrave
         subprocess.run(["convert-ly", "-e", src], cwd=work, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+        # chord symbols (ChordNames) sound in LilyPond's MIDI but are not notes on a staff
+        text = open(src, encoding="utf-8", errors="replace").read()
+        m = re.search(r'\\version\s*"[^"]*"\s*', text)
+        quiet = '\n\\midi { \\context { \\ChordNames \\remove "Note_performer" } }\n'
+        text = text[:m.end()] + quiet + text[m.end():] if m else quiet + text
+        open(src, "w", encoding="utf-8").write(text)
         subprocess.run(["lilypond", "-s", "-I", os.path.dirname(os.path.abspath(f)), "-o", os.path.join(work, "out"), src],
                        cwd=work, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
         pdfs = sorted(glob.glob(os.path.join(work, "out*.pdf")))
