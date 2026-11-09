@@ -17,6 +17,30 @@ const Entry smufl[] = {
 #include "SmuflNames.inc"
 };
 
+struct Optional { const char* font; unsigned codepoint; const char* name; };
+const Optional optional[] = {
+#include "SmuflOptional.inc"
+};
+
+// A font's own optional glyph (U+F400 up), named without its variant
+// suffix where the base is a SMuFL name: "noteheadBlackOversized" stays
+// itself, "gClef.salt01" becomes "gClef".
+std::string optionalName (const std::string& lowerFont, unsigned codepoint)
+{
+    const char* fallback = nullptr;
+    for (const auto& o : optional)
+    {
+        if (o.codepoint != codepoint) continue;
+        if (lowerFont.find (o.font) != std::string::npos) { fallback = o.name; break; }
+        if (fallback == nullptr && std::strcmp (o.font, "bravura") == 0) fallback = o.name;
+    }
+    if (fallback == nullptr) return {};
+    std::string n = fallback;
+    const auto dot = n.find ('.');
+    if (dot != std::string::npos) n.erase (dot);
+    return n;
+}
+
 const std::unordered_map<unsigned, const char*>& byCodepoint()
 {
     static const auto table = [] {
@@ -167,7 +191,10 @@ Naming name (const std::string& fontName, unsigned unicode, const std::string& g
     if (unicode >= 0xE000 && unicode <= 0xF8FF)
     {
         out.name = smuflName (unicode);
+        if (out.name.empty() && unicode >= 0xF400) out.name = optionalName (font, unicode);
         if (! out.name.empty()) return out;
+        out.musicFontUnread = true;   // a music symbol we have no name for
+        return out;
     }
 
     // A SMuFL font without Unicode values may still carry its glyph names.

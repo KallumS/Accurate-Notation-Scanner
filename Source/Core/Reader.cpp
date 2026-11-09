@@ -1819,6 +1819,63 @@ SystemRead PageReader::readSystem (int systemIndex, std::vector<StaffState>& sta
                            [&] (int a, int b) { return items[static_cast<size_t> (a)].x < items[static_cast<size_t> (b)].x; });
             }
 
+            // Triplets whose "3" was left off (engravers print it on the first
+            // few only). Only when a voice overflows its bar, only for beamed
+            // groups of three (or six) equal notes with no tuplet, and only if
+            // that makes the voice fill the bar exactly.
+            for (auto& v : voices)
+            {
+                Fraction sum;
+                for (int ii : v) if (! items[static_cast<size_t> (ii)].grace) sum += items[static_cast<size_t> (ii)].duration;
+                if (sum <= length) continue;
+                auto sharesBeam = [&] (int a, int b) {
+                    const auto& A = items[static_cast<size_t> (a)];
+                    const auto& B = items[static_cast<size_t> (b)];
+                    if (A.stem < 0 || B.stem < 0) return false;
+                    const auto& la = stems[static_cast<size_t> (A.stem)].levels;
+                    const auto& lb = stems[static_cast<size_t> (B.stem)].levels;
+                    if (la.empty() || lb.empty()) return false;
+                    for (int x : la.front()) for (int y : lb.front()) if (x == y) return true;
+                    return false;
+                };
+                std::vector<std::vector<int>> groups;
+                std::vector<int> notes;
+                for (int ii : v) if (! items[static_cast<size_t> (ii)].grace) notes.push_back (ii);
+                for (size_t i = 0; i < notes.size(); ++i)
+                {
+                    if (! groups.empty() && i > 0 && sharesBeam (notes[i - 1], notes[i])) groups.back().push_back (notes[i]);
+                    else groups.push_back ({ notes[i] });
+                }
+                std::vector<std::vector<int>> candidates;
+                for (const auto& g : groups)
+                {
+                    if (g.size() != 3 && g.size() != 6) continue;
+                    bool equal = true;
+                    for (int ii : g)
+                    {
+                        const auto& it = items[static_cast<size_t> (ii)];
+                        equal = equal && ! it.rest && ! it.tuplet.active() && it.dots == 0 && it.type == items[static_cast<size_t> (g.front())].type;
+                    }
+                    if (equal) candidates.push_back (g);
+                }
+                if (candidates.empty()) continue;
+                Fraction trial = sum;
+                for (const auto& g : candidates)
+                    for (int ii : g) trial -= items[static_cast<size_t> (ii)].duration * Fraction (1, 3);
+                if (trial != length) continue;
+                for (const auto& g : candidates)
+                    for (size_t k2 = 0; k2 < g.size(); ++k2)
+                    {
+                        auto& it = items[static_cast<size_t> (g[k2])];
+                        it.tuplet.actual = static_cast<int> (g.size()) == 6 ? 6 : 3;
+                        it.tuplet.normal = static_cast<int> (g.size()) == 6 ? 4 : 2;
+                        it.tuplet.start = k2 == 0;
+                        it.tuplet.stop = k2 + 1 == g.size();
+                        it.duration = itemDuration (it);
+                    }
+                bar.problems.push_back ({ Issue::Info, "Triplets without a printed 3 were read as triplets: the bar only adds up that way." });
+            }
+
             // Onsets: each voice in turn; a second voice lines up with the first by position.
             std::vector<std::pair<double, Fraction>> columns;
             Fraction longest;
@@ -2216,6 +2273,10 @@ ReadResult readScore (const std::vector<PageInk>& pages)
             }
         }
 
+        if (page.unnamedMusicGlyphs > 0)
+            result.issues.push_back ({ Issue::Warning, page.number, { 0, 0, page.width, page.height }, -1, -1,
+                                      std::to_string (page.unnamedMusicGlyphs) + " music symbols on this page could not be named and were left out; check the page." });
+
         PageReader reader (page, layout);
         reader.prepare();
 
@@ -2336,6 +2397,12 @@ ReadResult readScore (const std::vector<PageInk>& pages)
                 flatIndex.push_back (static_cast<int> (k));
             }
             auto read = reader.readSystem (static_cast<int> (s), flat, flatIndex);
+            if (std::getenv ("ANS_DEBUG_PARTS") != nullptr)
+            {
+                std::fprintf (stderr, "  -> %d bars; staves to parts:", read.bars);
+                for (size_t k = 0; k < partIndex.size(); ++k) std::fprintf (stderr, " %d.%d", partIndex[k], staffInPart[k]);
+                std::fprintf (stderr, "\n");
+            }
             for (size_t k = 0; k < sys.staves.size(); ++k)
                 partState[static_cast<size_t> (partIndex[k])][static_cast<size_t> (staffInPart[k])] = flat[k];
 
@@ -2420,7 +2487,12 @@ ReadResult readScore (const std::vector<PageInk>& pages)
         if (! first.key)
             for (const auto& m : part.measures) if (m.key) { first.key = m.key; break; }
         if (! first.time)
-            for (const auto& m : parts.front().measures) if (m.time) { first.time = m.time; break; }
+        {
+            // from whichever part shows it first
+            for (size_t b = 0; b < part.measures.size() && ! first.time; ++b)
+                for (const auto& other : parts)
+                    if (b < other.measures.size() && other.measures[b].time) { first.time = other.measures[b].time; break; }
+        }
     }
 
     // A multi-bar rest stands for that many bars (the same in every part).
@@ -2551,7 +2623,8 @@ ReadResult readScore (const std::vector<PageInk>& pages)
             TimeSignature t;
             for (size_t b = 0; b < bars; ++b)
             {
-                if (parts.front().measures[b].time) t = *parts.front().measures[b].time;
+                for (const auto& part : parts)
+                    if (b < part.measures.size() && part.measures[b].time) { t = *part.measures[b].time; break; }
                 timeOf[b] = t;
             }
         }

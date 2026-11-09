@@ -44,3 +44,9 @@ TEST ("Letter-mapped music fonts are recognised, not read")
     CHECK (n.name.empty());
     CHECK (n.musicFontUnread);
 }
+
+TEST ("A font's optional glyphs are named (Bravura's oversized noteheads)")
+{
+    CHECK_EQ (glyphs::name ("ABCDEF+Bravura", 0xF4BE, "").name, std::string ("noteheadBlackOversized"));
+    CHECK_EQ (glyphs::name ("Bravura", 0xF4BD, "").name, std::string ("noteheadHalfOversized"));
+}
