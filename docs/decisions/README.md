@@ -14,3 +14,4 @@ numbered, not edited to stay true: a reversed decision gains a pointer.
 | [0007](0007-check-the-window-with-a-screenshot.md) | The window is checked with a screenshot | Accepted |
 | [0008](0008-playback-and-midi-from-the-read-score.md) | Playback and MIDI export, from the read score | Accepted |
 | [0009](0009-pictures-are-not-read.md) | Pictures (PNG, JPEG) are not read | Accepted |
+| [0010](0010-endings-read-and-repeats-played.md) | First and second endings are read; repeats are played | Accepted |

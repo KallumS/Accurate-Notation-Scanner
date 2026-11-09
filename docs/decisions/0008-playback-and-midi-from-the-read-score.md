@@ -25,6 +25,7 @@ to export MIDI. Noterator already plays through Apple's General MIDI set
 ## Consequences
 
 - Pitches are as written: a transposing instrument sounds at written pitch.
-- Repeats are played once (voltas are not read yet).
+- Repeats are played once (voltas are not read yet). *Changed by 0010: repeats
+  and first/second endings are now played.*
 - Tested on Linux with a silent PulseAudio sink and a screenshot
   (`--play seconds`); Apple's synth is only exercised on a Mac.

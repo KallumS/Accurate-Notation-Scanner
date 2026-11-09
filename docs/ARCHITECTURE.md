@@ -6,12 +6,14 @@ PDF ──MuPDF──▶ PageInk ──Layout──▶ staves, systems, parts, b
                        │
                        ▼ Reader
         heads ─ stems ─ beams/flags ─ dots ─ accidentals ─▶ chords and rests
-        clefs, key and time signatures, ties, slurs, tuplets, dynamics
+        clefs, key and time signatures, ties, slurs, tuplets, dynamics,
+        repeats and first/second endings (voltas)
         voices and onsets (a time grid shared by all staves of a system)
         the check: bars add up, voices fit, ties land, heads on lines
                        │
                        ▼
                 Score + Issues ──MusicXml──▶ .musicxml
+                       │      └──Midi (perform, playOrder)──▶ .mid, playback
                        │
                        ▼
         app: list of files, the page with marked bars, the issue list
@@ -37,6 +39,10 @@ PDF ──MuPDF──▶ PageInk ──Layout──▶ staves, systems, parts, b
   comments at the top of `Reader.h`), then the whole-score passes: tie
   consistency, multi-bar rests expanded, pickup bar, the bar check.
 - **MusicXml** writes partwise MusicXML 4.0 with exact divisions.
+- **Midi** turns the Score into sound: `playOrder()` follows repeats and
+  endings, `perform()` makes the notes (ties joined, dynamics, an instrument
+  per part), `toMidiFile()` writes them; the app's player plays the same
+  performance (0008, 0010).
 - **Convert** is the one call the app and the command line use; it also
   writes the report JSON.
 
