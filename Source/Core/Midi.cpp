@@ -1,5 +1,7 @@
 #include "Midi.h"
 
+#include "AutoCC.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -216,6 +218,7 @@ Performance perform (const Score& score)
                         if (v > 0) velocityOfStaff[d.staff] = v;
                     }
                 const int velocity = velocityOfStaff.count (e->staff) ? velocityOfStaff[e->staff] : 80;
+                const int dynamicLevel = velocityOfStaff.count (e->staff) ? velocityOfStaff[e->staff] - velocityFor ("mf") : 0;
                 double start = barT + e->offset.value();
                 double length = e->duration.value();
                 if (e->grace)
@@ -233,6 +236,7 @@ Performance perform (const Score& score)
                         {
                             auto& held = out.notes[it->index];
                             held.length = start + length - held.start;
+                            held.written = held.length;
                             if (! n.tieStart) open.erase (it);
                             continue;
                         }
@@ -243,7 +247,9 @@ Performance perform (const Score& score)
                     pn.pitch = pitch;
                     pn.start = start;
                     pn.length = std::max (0.05, length * (e->grace ? 1.0 : 0.95));
+                    pn.written = std::max (0.05, length);
                     pn.velocity = velocity;
+                    pn.dynamic = dynamicLevel;
                     pn.bar = static_cast<int> (b);
                     out.notes.push_back (pn);
                     if (n.tieStart && ! e->grace) open.push_back ({ out.notes.size() - 1, pitch, e->staff });
@@ -252,7 +258,58 @@ Performance perform (const Score& score)
         }
     }
     std::stable_sort (out.notes.begin(), out.notes.end(), [] (const PlayedNote& a, const PlayedNote& b) { return a.start < b.start; });
+
+    // AutoCC's curves, part by part, for the instruments that sustain.
+    for (size_t p = 0; p < score.parts.size(); ++p)
+    {
+        const int family = sustainFamily (out.programOfPart[p]);
+        if (family == 0) continue;
+        autocc::Settings settings;
+        settings.preset = family == 1 ? autocc::Preset::Strings : family == 2 ? autocc::Preset::Brass
+                        : family == 3 ? autocc::Preset::Woodwinds : autocc::Preset::Default;
+        // AutoCC's gesture is first key down to last key up, and in its
+        // Legato mode only those two moments act. Notes written joined (each
+        // starting before the line before it has ended) are one gesture, as a
+        // player overlapping the keys would give it; a rest ends it. So one key
+        // per gesture, with the first note's velocity, is exactly what AutoCC
+        // would make of the line played legato.
+        std::vector<autocc::KeyEvent> keys;
+        int lastDynamic = 0;
+        double gestureEnd = -1;
+        for (const auto& n : out.notes)
+        {
+            if (n.part != static_cast<int> (p)) continue;
+            const double on = out.seconds (n.start), off = out.seconds (n.start + n.written);
+            if (keys.empty() || on > gestureEnd + 1e-6)
+            {
+                if (! keys.empty()) keys.push_back ({ gestureEnd, 60, 0, false });
+                keys.push_back ({ on, 60, n.velocity, true });
+                gestureEnd = off;
+            }
+            else
+                gestureEnd = std::max (gestureEnd, off);
+            if (n.dynamic != lastDynamic || settings.dynamic.empty())
+            {
+                settings.dynamic.push_back ({ on, std::clamp (n.dynamic, -64, 64) });
+                lastDynamic = n.dynamic;
+            }
+        }
+        if (! keys.empty()) keys.push_back ({ gestureEnd, 60, 0, false });
+        if (keys.empty()) continue;
+        for (const auto& c : autocc::render (keys, settings))
+            out.controls.push_back ({ static_cast<int> (p), out.channelOfPart[p], out.quarters (c.seconds), c.cc, c.value });
+    }
+    std::stable_sort (out.controls.begin(), out.controls.end(), [] (const PlayedControl& a, const PlayedControl& b) { return a.start < b.start; });
     return out;
+}
+
+int sustainFamily (int program)
+{
+    if ((program >= 40 && program <= 45) || (program >= 48 && program <= 51)) return 1;   // strings, not harp or timpani
+    if (program >= 56 && program <= 63) return 2;
+    if (program >= 64 && program <= 79) return 3;
+    if (program >= 52 && program <= 54) return 4;
+    return 0;
 }
 
 namespace
@@ -357,6 +414,13 @@ std::string toMidiFile (const Score& score, const Performance& perf)
             off += static_cast<char> (0x80 | ch); off += static_cast<char> (n.pitch); off += static_cast<char> (0);
             ev.push_back ({ tick (n.start), 3, on });
             ev.push_back ({ tick (n.start + n.length), 2, off });   // a note off before a note on at the same time
+        }
+        for (const auto& c : perf.controls)
+        {
+            if (c.part != static_cast<int> (p)) continue;
+            std::string cc;
+            cc += static_cast<char> (0xb0 | ch); cc += static_cast<char> (c.controller); cc += static_cast<char> (c.value);
+            ev.push_back ({ tick (c.start), 2, cc });   // before a note starting with it
         }
         file += track (ev);
     }

@@ -95,6 +95,13 @@ void Player::play (const Performance& perf, double fromSeconds)
         seq->events.push_back ({ std::max (on, fromSeconds), juce::MidiMessage::noteOn (n.channel + 1, n.pitch, static_cast<juce::uint8> (n.velocity)) });
         seq->events.push_back ({ off, juce::MidiMessage::noteOff (n.channel + 1, n.pitch) });
     }
+    // AutoCC's expression and volume; CC1 and CC21 are left out: on General
+    // MIDI sounds CC1 is vibrato, not loudness (decision 0012)
+    for (const auto& c : perf.controls)
+    {
+        if (c.controller != 11 && c.controller != 7) continue;
+        seq->events.push_back ({ std::max (perf.seconds (c.start), fromSeconds), juce::MidiMessage::controllerEvent (c.channel + 1, c.controller, c.value) });
+    }
     std::stable_sort (seq->events.begin(), seq->events.end(), [] (const auto& a, const auto& b) {
         if (a.seconds < b.seconds || a.seconds > b.seconds) return a.seconds < b.seconds;
         return a.message.isNoteOff() && ! b.message.isNoteOff();

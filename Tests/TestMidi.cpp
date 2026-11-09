@@ -135,3 +135,79 @@ TEST ("Repeats are played twice, and first and second endings in turn")
     // no repeats: as written
     CHECK (ans::playOrder (barsWith (3, [] (auto&) {})) == (std::vector<int> { 0, 1, 2 }));
 }
+
+namespace
+{
+ans::Score violinAndPiano (const char* dynamic)
+{
+    ans::Score s;
+    s.quartersPerMinute = 60;   // a quarter note is a second
+    s.parts.resize (2);
+    s.parts[0].name = "Violin";
+    s.parts[1].name = "Piano";
+    for (auto& part : s.parts)
+    {
+        part.measures.resize (1);
+        ans::Measure& m = part.measures[0];
+        m.time = ans::TimeSignature {};
+        ans::Event e;
+        e.duration = ans::Fraction (4);
+        ans::Note n;
+        n.pitch = { 0, 4, 0 };
+        e.notes.push_back (n);
+        m.events.push_back (e);
+        if (dynamic != nullptr)
+        {
+            ans::Direction d;
+            d.dynamics = dynamic;
+            m.directions.push_back (d);
+        }
+    }
+    return s;
+}
+} // namespace
+
+TEST ("Playback: a violin gets AutoCC's string curves from its dynamic; a piano gets none")
+{
+    // AutoCC strings: CC1 starts at 85 and swells by 31; CC7 is held at 94.
+    // f is 14 above mf in the app's dynamics (velocity 92 against 78), which
+    // moves where CC1 starts and leaves the swell's size alone.
+    const auto perf = perform (violinAndPiano ("f"));
+    int firstCC1 = -1, topCC1 = -1, pianoControls = 0, cc7 = 0;
+    for (const auto& c : perf.controls)
+    {
+        if (c.part == 1) { ++pianoControls; continue; }
+        if (c.controller == 1 && firstCC1 < 0) firstCC1 = c.value;
+        if (c.controller == 1) topCC1 = std::max (topCC1, c.value);
+        if (c.controller == 7) { ++cc7; CHECK_EQ (c.value, 94); }
+    }
+    CHECK_EQ (firstCC1, 85 + 14);
+    // the top: AutoCC caps a level at 127 (116 + 14 is 130), and velocity
+    // scales the swell by 10%: 99 + (127 - 99) * (0.9 + 0.1 * 92 / 127) = 126.2.
+    // (This first expected 85 + 14 + 31, forgetting both - corrected 2026-11-09.)
+    CHECK_EQ (topCC1, 126);
+    CHECK_EQ (cc7, 1);
+    CHECK_EQ (pianoControls, 0);
+    // with no dynamic printed, the preset's own start
+    const auto plain = perform (violinAndPiano (nullptr));
+    for (const auto& c : plain.controls)
+        if (c.controller == 1) { CHECK_EQ (c.value, 85); break; }
+}
+
+TEST ("The MIDI file carries the curves in the violin's track")
+{
+    const auto score = violinAndPiano ("f");
+    const auto file = toMidiFile (score, perform (score));
+    // tracks: conductor, violin, piano; a controller message is 0xB0 | channel
+    std::vector<size_t> starts;
+    for (size_t at = file.find ("MTrk"); at != std::string::npos; at = file.find ("MTrk", at + 4)) starts.push_back (at);
+    CHECK_EQ (starts.size(), size_t (3));
+    if (starts.size() == 3)
+    {
+        const auto violin = file.substr (starts[1], starts[2] - starts[1]);
+        const auto piano = file.substr (starts[2]);
+        CHECK (violin.find (std::string ("\xb0\x01", 2)) != std::string::npos);   // CC1 on channel 1
+        CHECK (violin.find (std::string ("\xb0\x0b", 2)) != std::string::npos);   // CC11
+        CHECK (piano.find ('\xb1') == std::string::npos);                         // nothing on the piano's channel 2
+    }
+}
