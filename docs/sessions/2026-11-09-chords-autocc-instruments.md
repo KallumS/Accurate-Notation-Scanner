@@ -57,11 +57,12 @@ playback.
   31 unmarked wrong bars).
 - Chords on Mozart: 59.7% root, 54.3% root and quality, per beat.
 
-## Blocked
+## AutoCC against the JSFX itself
 
-- Running AutoCC.jsfx itself for a cross-check needs ysfx downloaded and
-  built; the sandbox refused that (code from outside). The port is line by
-  line, and tested against AutoCC's documented numbers.
+The sandbox first refused downloading and building ysfx (code from
+outside); the user then allowed it. `tools/autocc/` builds the real
+AutoCC.jsfx and this port side by side: 1,300 random note sequences, every
+CC value at the same sample in both.
 
 ## Next
 

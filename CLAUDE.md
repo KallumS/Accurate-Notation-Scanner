@@ -101,10 +101,11 @@ ANS_DEBUG_TIES=1  build-core/notation-scan x.pdf --stdout -q    # every curve an
   (52,800 voicings checked against the Lua); 59.7% of beats agree with the
   DCML Mozart analysts' root (ceiling ~72% naming notes alone). Shown with
   the app's Chords button; never written into the MusicXML.
-- AutoCC's curves in playback and MIDI export (0012). Not yet run against
-  the JSFX itself (needs the ysfx host built; not allowed in the sandbox).
-  Noterator has its own AutoCC port that releases between written notes;
-  this one treats joined notes as one gesture - worth reconciling.
+- AutoCC's curves in playback and MIDI export (0012): the port matches
+  AutoCC.jsfx run through ysfx exactly, sample for sample, on 1,300 random
+  note sequences (`tools/autocc/build.sh`, then `compare.py`). Noterator
+  has its own AutoCC port that releases between written notes; this app
+  gives AutoCC one gesture per run of joined notes - worth reconciling.
 - Instruments from part names, transposition from key signatures (0013):
   96/96 parts right on `tools/transposingscore.py` engravings.
 - The Mac CI job is cancelled by GitHub before it starts (account's Mac
