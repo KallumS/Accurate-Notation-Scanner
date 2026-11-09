@@ -64,6 +64,23 @@ outside); the user then allowed it. `tools/autocc/` builds the real
 AutoCC.jsfx and this port side by side: 1,300 random note sequences, every
 CC value at the same sample in both.
 
+## Later: AutoCC as Noterator, and Apple's guidelines
+
+- AutoCC is now fed as Noterator feeds it, at the user's request: each
+  written note a key of its own, Dynamic left at 0 (0012, amended). The
+  violin test's expectations changed with the requirement (reason beside
+  them); a test for notes written end to end was added.
+- The window reviewed against Apple's HIG as Good Idea and Noterator apply
+  it (0014, `docs/apple-hig-review.md`): 7:1 text, Increase Contrast,
+  Interface Size to 200% with a layout that wraps, the problem list off the
+  bottom edge, keyboard and VoiceOver names, a menu bar, the ink bar for
+  "on", the writing. `Tests/TestTheme.cpp` checks the colours. Pictures at
+  100% and 200%: `docs/window.png`, `docs/window-200.png`.
+- The first 200% picture showed the toolbar running off the edge and the
+  file name over the page count: fixed by folding the toolbar and growing
+  the header. A crash in the screenshot run was the virtual screen gone
+  after a restart, not the app.
+
 ## Next
 
 - A note far outside its instrument's range is a likely misread: mark it.

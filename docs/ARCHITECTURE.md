@@ -56,10 +56,12 @@ PDF ──MuPDF──▶ PageInk ──Layout──▶ staves, systems, parts, b
 ## The app (`Source/App`, JUCE 8)
 
 One window (`MainComponent`): files on the left (converted two at a time on
-a thread pool), the chosen file's page rendered by MuPDF with its issues
-outlined, the issue list, Save / Save All / Show in Finder / Open in
-Noterator. `--screenshot` draws the window into a PNG for checking without
-a screen.
+a thread pool), the chosen file's name, summary and instruments, the bars
+that need a look, then the page rendered by MuPDF with them outlined (and
+the chords, with Chords on). A toolbar that folds into rows, and a menu bar
+(File, View with Interface Size, Play). `Theme` holds the family's colours,
+focus ring and click rule; `SystemSettings` reads Increase Contrast (0014).
+`--screenshot` draws the window into a PNG for checking without a screen.
 
 ## The checking
 

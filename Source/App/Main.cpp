@@ -3,7 +3,7 @@
     and PDFs handed over by the Finder (dropped on the Dock icon, or "Open
     With") or on the command line.
 
-    --screenshot out.png [--select N] [--play seconds] [--chords] file.pdf... opens the
+    --screenshot out.png [--select N] [--play seconds] [--chords] [--interface-size 200] file.pdf... opens the
     files, waits for them to be
     read, draws the window into a PNG and quits: how the window is checked
     without a screen (decision 0007).
@@ -25,9 +25,9 @@ public:
         content = new MainComponent();
         setContentOwned (content, true);
         setResizable (true, true);
-        setResizeLimits (820, 560, 4000, 4000);
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
+        content->windowReady();   // its smallest size, for the interface size in use
     }
 
     void closeButtonPressed() override { juce::JUCEApplication::getInstance()->systemRequestedQuit(); }
@@ -56,6 +56,13 @@ public:
         if (shot >= 0 && shot + 1 < args.size())
         {
             screenshot = juce::File::getCurrentWorkingDirectory().getChildFile (args[shot + 1]);
+            if (args.indexOf ("--interface-size") >= 0)
+            {
+                const int at = args.indexOf ("--interface-size");
+                interfaceSize = args[at + 1].getFloatValue() / 100.0f;
+                args.removeRange (at, 2);
+                window->content->showInterfaceSize (interfaceSize);
+            }
             if (args.indexOf ("--chords") >= 0) { window->content->showChords (true); args.removeString ("--chords"); }
             if (args.indexOf ("--play") >= 0) { playFor = args[args.indexOf ("--play") + 1].getIntValue(); args.removeRange (args.indexOf ("--play"), 2); }
             const int select = args.indexOf ("--select");
@@ -97,6 +104,7 @@ private:
     juce::File screenshot;
     int selectAfter = -1;
     int playFor = 0;     // seconds of playback before the picture
+    float interfaceSize = 1.0f;
     int waited = 0;
 
     void timerCallback() override
@@ -112,7 +120,7 @@ private:
         }
         if (playFor > 0 && waited < 1000 + playFor * 1000 / 300) { ++waited; return; }
         stopTimer();
-        auto image = window->content->createComponentSnapshot (window->content->getLocalBounds(), true, 1.0f);
+        auto image = window->content->createComponentSnapshot (window->content->getLocalBounds(), true, interfaceSize);
         juce::FileOutputStream out (screenshot);
         if (out.openedOk())
         {

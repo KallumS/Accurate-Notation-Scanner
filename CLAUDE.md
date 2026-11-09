@@ -27,7 +27,7 @@ cmake -B build-core -G Ninja -DANS_BUILD_APP=OFF -DANS_SYSTEM_MUPDF=ON && cmake 
 # the app (downloads JUCE)
 cmake -B build -G Ninja -DANS_SYSTEM_MUPDF=ON -DCMAKE_BUILD_TYPE=Release && cmake --build build --target AccurateNotationScanner
 # a picture of the window, no screen needed (start Xvfb :99 first)
-DISPLAY=:99 "build/AccurateNotationScanner_artefacts/Release/Accurate Notation Scanner" --screenshot out.png --select 0 a.pdf b.pdf
+DISPLAY=:99 "build/AccurateNotationScanner_artefacts/Release/Accurate Notation Scanner" --screenshot out.png --select 0 [--interface-size 200] [--chords] a.pdf b.pdf
 # the large-corpus check (OpenScore Lieder/Quartets, DCML, music21's corpus; see docs/ACCURACY.md)
 ANS_SCANNER=build-core/notation-scan python3 tools/bigcorpus.py musescore out/ path/to/scores --jobs 4
 python3 tools/bigcorpus.py lilypond out/ path/to/*.ly    # Mutopia: LilyPond's MIDI is the truth; runs code in .ly files, sandbox only
@@ -82,6 +82,14 @@ ANS_DEBUG_TIES=1  build-core/notation-scan x.pdf --stdout -q    # every curve an
   export alike. A part sounds at concert pitch only where the page shows it
   transposed (its key signature against the score's, 0013); otherwise as
   written. AutoCC's curves come with it (0012).
+- **The window follows Apple's HIG as the family does (0014,
+  `docs/apple-hig-review.md`)**: words 7:1 on what they sit on
+  (`Tests/TestTheme.cpp` checks), `#8A919C` never for words; nothing important
+  along the bottom edge; layouts wrap at 200% Interface Size rather than
+  crop; a name for VoiceOver on anything whose face is not a word; clicks
+  leave the keys with the window (`theme::clicksKeepFocus`); "on" carries
+  the ink bar as well as the yellow. Check with screenshots at
+  `--interface-size 100` and `200`.
 - The audio thread does not allocate or lock (`Player.cpp`): the sequence
   is swapped in whole.
 

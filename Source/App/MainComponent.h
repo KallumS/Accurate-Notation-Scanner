@@ -59,12 +59,22 @@ private:
 
 class MainComponent : public juce::Component,
                       public juce::FileDragAndDropTarget,
+                      public juce::MenuBarModel,
                       private juce::ListBoxModel,
                       private juce::Timer
 {
 public:
     MainComponent();
     ~MainComponent() override;
+
+    // The menu bar (decision 0014): File, View, Play.
+    juce::StringArray getMenuBarNames() override;
+    juce::PopupMenu getMenuForIndex (int index, const juce::String&) override;
+    void menuItemSelected (int id, int) override;
+    // Once the window is up: its smallest size, for the interface size in use.
+    void windowReady();
+    // For checking the window: an interface size from the command line (not saved).
+    void showInterfaceSize (float scale) { juce::Desktop::getInstance().setGlobalScaleFactor (scale); windowReady(); }
 
     void addFiles (const juce::StringArray& paths);
     void showChords (bool on) { chordsButton.setToggleState (on, juce::dontSendNotification); preview.showChords (on); }
@@ -90,7 +100,7 @@ private:
     bool dragging = false;
 
     juce::TextButton openButton { ui ("Open\xe2\x80\xa6") }, saveButton { ui ("Save MusicXML\xe2\x80\xa6") },
-                     saveAllButton { "Save All" }, revealButton { "Show in Finder" }, noteratorButton { "Open in Noterator" },
+                     saveAllButton { ui ("Save All\xe2\x80\xa6") }, revealButton { "Show in Finder" }, noteratorButton { "Open in Noterator" },
                      playButton { "Play" }, chordsButton { "Chords" }, midiButton { ui ("Export MIDI\xe2\x80\xa6") },
                      prevPage { ui ("\xe2\x80\xb9") }, nextPage { ui ("\xe2\x80\xba") };
     juce::ListBox fileList { "Files", this };
@@ -102,6 +112,8 @@ private:
         int getNumRows() override;
         void paintListBoxItem (int row, juce::Graphics&, int w, int h, bool selected) override;
         void listBoxItemClicked (int row, const juce::MouseEvent&) override;
+        juce::String getNameForRow (int row) override;   // what VoiceOver reads
+        juce::String getTooltipForRow (int row) override { return getNameForRow (row); }   // the whole message, where the row cuts it short
     } issueModel { *this };
     juce::ListBox issueList { "Issues", &issueModel };
 
@@ -124,7 +136,32 @@ private:
     juce::File noteratorApp() const;
     static juce::String ui (const char* s) { return juce::String::fromUTF8 (s); }
 
+    // Interface size (View menu), the Mac's Increase Contrast, remembered settings.
+    juce::ApplicationProperties settings;
+    static const std::vector<float>& interfaceScales();
+    void setInterfaceScale (float scale);
+    void readSystemSettings();
+    struct SettingsWatch : juce::Timer
+    {
+        MainComponent& owner;
+        explicit SettingsWatch (MainComponent& o) : owner (o) {}
+        void timerCallback() override { owner.readSystemSettings(); }
+    } settingsWatch { *this };
+    void openFiles();
+    void setChords (bool on);
+    void updateTitle();
+    juce::String issueWhere (const Job&, const Issue&) const;
+    juce::String partLabel (const Job&, int part) const;
+    juce::String whoPlays (const Job&) const;
+    // The layout, worked out in resized() for the width and interface size:
+    // the toolbar folds into rows and the header grows rather than cropping.
+    int toolbarHeight = 56, listWidth = 320, headerHeight = 84;
+    int summaryLines = 1, whoLines = 1;
+    juce::Rectangle<int> headerTextArea() const;
+
     int getNumRows() override { return jobs.size(); }
+    juce::String getNameForRow (int row) override;
+    juce::String getTooltipForRow (int row) override { return getNameForRow (row); }
     void paintListBoxItem (int row, juce::Graphics&, int w, int h, bool selected) override;
     void selectedRowsChanged (int row) override;
 };

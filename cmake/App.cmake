@@ -20,7 +20,8 @@ target_sources(AccurateNotationScanner PRIVATE
     Source/App/Main.cpp
     Source/App/MainComponent.cpp
     Source/App/Player.cpp
-    Source/App/Theme.cpp)
+    Source/App/Theme.cpp
+    Source/App/SystemSettings.cpp)
 
 target_compile_definitions(AccurateNotationScanner PRIVATE
     JUCE_WEB_BROWSER=0

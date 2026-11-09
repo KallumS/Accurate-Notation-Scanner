@@ -56,9 +56,10 @@ if(ANS_BUILD_TESTS)
         Tests/TestChords.cpp
         Tests/TestHarmony.cpp
         Tests/TestAutoCC.cpp
-        Tests/TestInstruments.cpp)
+        Tests/TestInstruments.cpp
+        Tests/TestTheme.cpp)
     target_link_libraries(ScannerTests PRIVATE ScannerCore)
-    target_compile_definitions(ScannerTests PRIVATE ANS_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/Tests/fixtures")
+    target_compile_definitions(ScannerTests PRIVATE ANS_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/Tests/fixtures" ANS_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/Source")
     add_test(NAME Core COMMAND ScannerTests)
 endif()
 

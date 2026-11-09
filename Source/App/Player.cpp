@@ -69,7 +69,7 @@ Player::Player()
     {
         juce::String error;
         appleSynth = au.createInstanceFromDescription (*found.getFirst(), 44100.0, 512, error);
-        if (appleSynth != nullptr) sound = "the Mac's General MIDI instruments";
+        if (appleSynth != nullptr) sound = juce::String::fromUTF8 ("the Mac\xe2\x80\x99s General MIDI instruments");
     }
    #endif
 
