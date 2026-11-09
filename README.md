@@ -49,8 +49,8 @@ and method: [docs/ACCURACY.md](docs/ACCURACY.md).
 | OpenScore String Quartets | 119 movements | 1.37 million | 96.4% |
 | Mozart piano sonatas | 58 movements | 122,000 | 96.4% |
 | Beethoven string quartets | 70 movements | 278,000 | 99.4% |
-| Bach chorales, madrigals, Lieder, quartets, random stress tests | 101 | 35,000 | 98.5% |
-| **All** | **1,680** | **3.27 million** | **93.3%** |
+| music21 corpus: 410 Bach chorales, Palestrina, Monteverdi, Trecento, folk tunes, more | 927 | 547,000 | 98.5% |
+| **All** | **2,506** | **3.79 million** | **94.0%** |
 
 Most of what is wrong is marked on the page for you to check (79% of wrong
 bars in the songs, 43-81% elsewhere). What is not marked is mostly ties: the

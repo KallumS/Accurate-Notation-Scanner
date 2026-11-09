@@ -28,11 +28,13 @@ told about, which matter most (decision 0002).
 | OpenScore **String Quartets** | 119 movements | 1,369,369 | **96.4%** | 94.7% |
 | DCML **Mozart piano sonatas** | 58 movements | 121,607 | **96.4%** | 94.0% |
 | DCML **Beethoven string quartets** | 70 movements | 277,897 | **99.4%** | 98.7% |
-| music21 corpus (chorales, madrigals, quartets, songs, Lieder) and random stress scores | 101 | 34,525 | 98.5% | 97.9% |
-| **All** | **1,680** | **3,272,759** | **93.3%** | |
-
-(music21's whole corpus - all 410 Bach chorales, Palestrina, Trecento,
-folk tunes - is being added; see the end.)
+| music21: all 410 **Bach chorales** | 410 | 115,942 | **99.6%** | 99.7% |
+| music21: **Palestrina** masses and motets | 150 | 88,963 | **99.98%** | 99.9% |
+| music21: **Monteverdi** madrigals | 49 | 50,852 | **99.9%** | 99.8% |
+| music21: **Trecento** (14th-century Italian) | 102 | 85,226 | **96.1%** | 98.6% |
+| music21: folk tunes (Ryan's Mammoth Collection) | 150 | 17,187 | **99.8%** | 99.5% |
+| music21: other (quartets, Lieder, piano, concerto) | 66 | 189,249 | **97.8%** | 98.5% |
+| **All** | **2,506** | **3,785,653** | **94.0%** | |
 
 Per piece in the Lieder: the median song is 95.4% right, 298 songs are 99%
 or better, 116 are exact.
@@ -45,6 +47,7 @@ or better, 116 are exact.
 | String Quartets | 7,192 | 57% | 3,092 (1.0% of all bars) |
 | Mozart sonatas | 843 | 81% | 160 (1.0%) |
 | Beethoven quartets | 612 | 43% | 346 (0.5%) |
+| music21 corpus | 1,374 | 47% | 732 (0.4%) |
 
 The unmarked errors, sampled (1,046 bars from 200 songs):
 
@@ -57,6 +60,9 @@ The unmarked errors, sampled (1,046 bars from 200 songs):
 | Other | 18% | Rests, onsets of a second voice starting mid-bar, lengths. |
 
 ### Files reported "every bar checked out"
+
+In the music21 corpus, 773 pieces were reported clean and 742 of them (96%)
+matched exactly.
 
 Of the Lieder, 145 songs were reported clean; 94 matched exactly. The 51
 others differed in 1,124 of their 44,082 notes (2.5%): mostly ties, and
