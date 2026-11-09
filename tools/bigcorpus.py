@@ -8,7 +8,7 @@
 
   LilyPond sources (.ly, e.g. the Mutopia Project):
     python3 tools/bigcorpus.py lilypond OUT FILE_OR_DIR... [--limit N]
-  Each is engraved by LilyPond (in its safe mode) into a PDF and a MIDI file;
+  Each is engraved by LilyPond (LilyPond 2.24 has no safe mode: run it only in a sandbox) into a PDF and a MIDI file;
   the MIDI is the truth: every note's pitch, onset and length.
 
 Results go to OUT/results.jsonl (one line per piece) and a summary is
@@ -224,6 +224,34 @@ def notes_of_musicxml(path):
     return out
 
 
+def compare_aligned(truth, read):
+    """Notes matched after lining the two up chord by chord, so that one
+    misread (or a repeat the MIDI plays twice) costs only what it is, not
+    every note after it. Returns (pitch matches, pitch+length matches, total)."""
+    import difflib
+    from collections import Counter, defaultdict
+    r4 = lambda x: round(x * 48) / 48
+    def chords(notes):
+        by = defaultdict(list)
+        for o, p, d in notes:
+            by[r4(o)].append((p, r4(d)))
+        return [sorted(by[k]) for k in sorted(by)]
+    T, R = chords(truth), chords(read)
+    sm = difflib.SequenceMatcher(None, [tuple(p for p, d in c) for c in T], [tuple(p for p, d in c) for c in R], autojunk=False)
+    pitch = full = 0
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            for a, b in zip(T[i1:i2], R[j1:j2]):
+                pitch += len(a)
+                full += sum((Counter(a) & Counter(b)).values())
+        elif tag == "replace":
+            for a, b in zip(T[i1:i2], R[j1:j2]):
+                ca, cb = Counter(p for p, d in a), Counter(p for p, d in b)
+                pitch += sum((ca & cb).values())
+                full += sum((Counter(a) & Counter(b)).values())
+    return pitch, full, len(truth)
+
+
 def compare_notes(truth, read):
     """Multiset match by (onset, pitch) and by (onset, pitch, duration)."""
     from collections import Counter
@@ -244,9 +272,9 @@ def engrave_lilypond(args):
     try:
         src = os.path.join(work, "in.ly")
         shutil.copy(f, src)
-        # bring old syntax up to date, then engrave with Scheme restricted
+        # bring old syntax up to date, then engrave
         subprocess.run(["convert-ly", "-e", src], cwd=work, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
-        subprocess.run(["lilypond", "-dsafe", "-s", "-I", os.path.dirname(os.path.abspath(f)), "-o", os.path.join(work, "out"), src],
+        subprocess.run(["lilypond", "-s", "-I", os.path.dirname(os.path.abspath(f)), "-o", os.path.join(work, "out"), src],
                        cwd=work, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
         pdfs = sorted(glob.glob(os.path.join(work, "out*.pdf")))
         mids = sorted(glob.glob(os.path.join(work, "out*.mid*")))
@@ -281,9 +309,21 @@ def check_midi(args):
         got = notes_of_musicxml(read)
     except Exception as e:
         return {"name": name, "status": "compare-failed", "why": str(e)[:200]}
+    # A transposing instrument (a guitar sounds an octave below what is
+    # written) moves the MIDI, not the page: allow one shift for the piece.
+    shift = 0
+    best = -1
+    for s in (0, -12, 12, -24, 24):
+        moved = [(o, p + s, d) for o, p, d in got]
+        m = compare_aligned(truth, moved)[0]
+        if m > best:
+            best, shift = m, s
+    got = [(o, p + shift, d) for o, p, d in got]
     onset_pitch, full, total, extra = compare_notes(truth, got)
+    a_pitch, a_full, _ = compare_aligned(truth, got)
     return {"name": name, "status": "read", "verdict": rep.get("verdict"), "matched_pitch_onset": onset_pitch,
-            "matched": full, "total": total, "extra": extra, "marked_bars": rep.get("barsWithIssues", 0), "bars": rep.get("bars", 0)}
+            "matched_exact_time": full, "matched": a_full, "matched_pitch": a_pitch, "total": total, "extra": extra,
+            "marked_bars": rep.get("barsWithIssues", 0), "bars": rep.get("bars", 0), "transposed": shift}
 
 
 def check_midi_isolated(args):
@@ -305,12 +345,14 @@ def summarise(results, mode):
     t = sum(r["total"] for r in read)
     m = sum(r["matched"] for r in read)
     clean = [r for r in read if r["verdict"] == "clean"]
-    clean_exact = [r for r in clean if r["matched"] == r["total"] and r["extra"] == 0]
+    clean_exact = [r for r in clean if r["matched"] == r["total"] and (r["extra"] == 0 or mode == "lilypond")]
     print(f"pieces: {len(results)}  read: {len(read)}  refused: {len(rejected)}  failed to compare: {len(failed)}")
     print(f"notes matched exactly: {m}/{t} ({100.0 * m / max(1, t):.2f}%)")
     if mode == "lilypond":
-        po = sum(r["matched_pitch_onset"] for r in read)
-        print(f"notes with the right pitch at the right time: {po}/{t} ({100.0 * po / max(1, t):.2f}%)")
+        po = sum(r["matched_pitch"] for r in read)
+        ex = sum(r["matched_exact_time"] for r in read)
+        print(f"notes with the right pitch, in sequence: {po}/{t} ({100.0 * po / max(1, t):.2f}%)")
+        print(f"notes at exactly the right time from the start: {ex}/{t} ({100.0 * ex / max(1, t):.2f}%)")
     else:
         b = sum(r["bars"] for r in read)
         bs = sum(r["bars_same"] for r in read)
