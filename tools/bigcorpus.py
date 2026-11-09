@@ -209,9 +209,14 @@ def read_midi(path):
     return notes
 
 
-def notes_of_musicxml(path):
+def notes_of_musicxml(path, expand=False):
     from music21 import converter, note, chord
     s = converter.parse(path)
+    if expand:
+        try:
+            s = s.expandRepeats()
+        except Exception:
+            return None
     out = []
     for p in s.parts:
         flat = p.stripTies().flatten()
@@ -309,6 +314,19 @@ def check_midi(args):
         got = notes_of_musicxml(read)
     except Exception as e:
         return {"name": name, "status": "compare-failed", "why": str(e)[:200]}
+    # The MIDI may play the repeats (a file can ask LilyPond to unfold
+    # them): try the score as written and with its repeats played out.
+    unfolded = False
+    if truth:
+        tl = max(o + d for o, p, d in truth)
+        gl = max((o + d for o, p, d in got), default=0)
+        if tl > gl * 1.15:
+            try:
+                expanded = notes_of_musicxml(read, expand=True)
+            except Exception:
+                expanded = None
+            if expanded and compare_aligned(truth, expanded)[0] > compare_aligned(truth, got)[0]:
+                got, unfolded = expanded, True
     # A transposing instrument (a guitar sounds an octave below what is
     # written) moves the MIDI, not the page: allow one shift for the piece.
     shift = 0
@@ -323,7 +341,7 @@ def check_midi(args):
     a_pitch, a_full, _ = compare_aligned(truth, got)
     return {"name": name, "status": "read", "verdict": rep.get("verdict"), "matched_pitch_onset": onset_pitch,
             "matched_exact_time": full, "matched": a_full, "matched_pitch": a_pitch, "total": total, "extra": extra,
-            "marked_bars": rep.get("barsWithIssues", 0), "bars": rep.get("bars", 0), "transposed": shift}
+            "marked_bars": rep.get("barsWithIssues", 0), "bars": rep.get("bars", 0), "transposed": shift, "unfolded": unfolded}
 
 
 def check_midi_isolated(args):
@@ -351,7 +369,7 @@ def summarise(results, mode):
     if mode == "lilypond":
         po = sum(r["matched_pitch"] for r in read)
         ex = sum(r["matched_exact_time"] for r in read)
-        print(f"notes with the right pitch, in sequence: {po}/{t} ({100.0 * po / max(1, t):.2f}%)")
+        print(f"notes with the right pitch, in sequence (the MIDI plays staccato short, so lengths differ): {po}/{t} ({100.0 * po / max(1, t):.2f}%)")
         print(f"notes at exactly the right time from the start: {ex}/{t} ({100.0 * ex / max(1, t):.2f}%)")
     else:
         b = sum(r["bars"] for r in read)
