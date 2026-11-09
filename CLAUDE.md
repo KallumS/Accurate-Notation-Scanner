@@ -60,6 +60,12 @@ ANS_DEBUG_TIES=1  build-core/notation-scan x.pdf --stdout -q    # every curve an
 
 ## Rules that are easy to break
 
+- **Never change a test to make it pass** (the user's rule). A test's
+  expectation comes from outside the code under test: the engraver's own
+  MusicXML, the printed page, the source file - written into the test by
+  hand, never computed by the code being tested or copied from its output.
+  If a test fails, fix the code, or show the user why the expectation
+  itself was wrong, with the evidence.
 - **Never guess** (0002). If the ink does not say it, the bar is marked. No
   fixing durations to make a bar add up, no assuming a missing accidental.
 - **Nothing reads pixels** (0001). A page without music-font glyphs is a scan

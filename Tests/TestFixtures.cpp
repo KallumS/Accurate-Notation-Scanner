@@ -5,6 +5,7 @@
 
 #include "Check.h"
 #include "Convert.h"
+#include "Midi.h"
 
 #include <algorithm>
 #include <cmath>
@@ -129,18 +130,18 @@ std::vector<std::string> endingsOf (const Score& score)
 
 TEST ("First and second endings are read, MuseScore and LilyPond alike")
 {
-    // MuseScore: a first and a second ending, both closed
+    // MuseScore: a first and a second ending, both closed, where MuseScore's
+    // own MusicXML has them (bars 21 and 22 counting the pickup as 0)
     const auto k = convertPdf (fixture ("ms_kinkel_op10no3.pdf"));
-    const auto ke = endingsOf (k.read.score);
-    CHECK_EQ (ke.size(), size_t (4));
-    if (ke.size() == 4)
-    {
-        CHECK (ke[0].find (":start 1.") != std::string::npos);
-        CHECK (ke[1].find (":stop 1") != std::string::npos);
-        CHECK (ke[2].find (":start 2.") != std::string::npos);
-        CHECK (ke[3].find (":stop 2") != std::string::npos);
-    }
-    // LilyPond: its digits come from a font with no Unicode table; the second ending is open
+    CHECK (endingsOf (k.read.score) == (std::vector<std::string> { "21:start 1.", "21:stop 1", "22:start 2.", "22:stop 2" }));
+    // and played as that MusicXML says: |: from bar 1, first ending, back, second ending
+    std::vector<int> order { 0 };
+    for (int b = 1; b <= 21; ++b) order.push_back (b);
+    for (int b = 1; b <= 20; ++b) order.push_back (b);
+    order.push_back (22);
+    CHECK (playOrder (k.read.score) == order);
+    // LilyPond: its digits come from a font with no Unicode table; the second
+    // ending is open. Bars 28 and 29 as printed (the system starts at bar 26).
     const auto c = convertPdf (fixture ("ly_carcassi_op60no24.pdf"));
     const auto ce = endingsOf (c.read.score);
     CHECK (ce == (std::vector<std::string> { "28:start 1.", "28:stop 1", "29:start 2.", "29:discontinue 2" }));

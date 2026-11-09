@@ -51,10 +51,17 @@ TEST ("Every sounding note of a read score is played once, ties joined")
             ++soundingInBar[bar];
         }
     }
-    const auto& measures = c.read.score.parts.front().measures;
+    // The order the bars are played in, from MuseScore's own MusicXML of this
+    // score (written out here, not taken from the code under test): a pickup
+    // and bars 1-24 twice, bars 25-63 twice, then 64-65.
+    std::vector<int> order;
+    for (int pass = 0; pass < 2; ++pass) for (int b = 0; b <= 24; ++b) order.push_back (b);
+    for (int pass = 0; pass < 2; ++pass) for (int b = 25; b <= 63; ++b) order.push_back (b);
+    order.push_back (64);
+    order.push_back (65);
+    CHECK (perf.barPlayed == order);
     int sounding = 0, graceNotes = 0;   // grace notes are played, though the truth's list leaves them out
-    CHECK (perf.barPlayed.size() > measures.size());   // it has repeats
-    for (int b : perf.barPlayed)
+    for (int b : order)
     {
         sounding += soundingInBar[b];
         for (const auto& part : c.read.score.parts)
