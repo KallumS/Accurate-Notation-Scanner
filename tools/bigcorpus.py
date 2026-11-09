@@ -15,7 +15,7 @@ Results go to OUT/results.jsonl (one line per piece) and a summary is
 printed: notes matched, bars identical, and - the number that matters
 most (decision 0002) - bars that were wrong but not marked.
 """
-import argparse, glob, json, os, shutil, subprocess, sys, tempfile, warnings
+import argparse, glob, json, os, shutil, subprocess, sys, tempfile, threading, warnings
 from concurrent.futures import ThreadPoolExecutor
 warnings.filterwarnings("ignore")
 
@@ -346,8 +346,11 @@ def check_midi(args):
 
 def check_midi_isolated(args):
     # music21 parsing in a subprocess keeps one bad file from stopping the run
-    r = subprocess.run([sys.executable, "-I", os.path.abspath(__file__), "_one_midi", json.dumps(args)],
-                       capture_output=True, text=True, timeout=900, cwd=HERE)
+    try:
+        r = subprocess.run([sys.executable, "-I", os.path.abspath(__file__), "_one_midi", json.dumps(args)],
+                           capture_output=True, text=True, timeout=900, cwd=HERE)
+    except subprocess.TimeoutExpired:
+        return {"name": args[0], "status": "compare-failed", "why": "took over 15 minutes"}
     try:
         return json.loads(r.stdout.strip().splitlines()[-1])
     except Exception:
@@ -391,6 +394,7 @@ def main():
     ap.add_argument("inputs", nargs="+")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--jobs", type=int, default=8)
+    ap.add_argument("--resume", action="store_true", help="keep the results a stopped run already has")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     base = os.path.commonpath([os.path.abspath(p) for p in a.inputs]) if len(a.inputs) > 1 else os.path.abspath(a.inputs[0])
@@ -406,8 +410,25 @@ def main():
         with ThreadPoolExecutor(a.jobs) as ex:
             list(ex.map(engrave_lilypond, [(f, n, d) for f, n in files]))
         triples = [(n, os.path.join(d, n + ".pdf"), os.path.join(d, n + ".midi")) for f, n in files if os.path.exists(os.path.join(d, n + ".pdf"))]
+        # each result is kept as it comes, so a stopped run picks up where it was (--resume)
+        progress = os.path.join(a.out, "progress.jsonl")
+        done = {}
+        if a.resume and os.path.exists(progress):
+            for line in open(progress):
+                r = json.loads(line)
+                done[r["name"]] = r
+        elif os.path.exists(progress):
+            os.remove(progress)
+        todo = [t for t in triples if t[0] not in done]
+        lock = threading.Lock()
+
+        def check_and_keep(t):
+            r = check_midi_isolated(t)
+            with lock, open(progress, "a") as f:
+                f.write(json.dumps(r) + "\n")
+            return r
         with ThreadPoolExecutor(a.jobs) as ex:
-            results = list(ex.map(check_midi_isolated, triples))
+            results = list(done.values()) + list(ex.map(check_and_keep, todo))
     with open(os.path.join(a.out, "results.jsonl"), "w") as f:
         for r in results:
             f.write(json.dumps(r) + "\n")
