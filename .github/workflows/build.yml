@@ -1,0 +1,107 @@
+# Builds Accurate Notation Scanner for macOS (an Apple silicon app in a .dmg,
+# ready to download from the run's Artifacts) and runs the tests on Linux
+# and macOS (decision 0004).
+#
+# Pushing a tag that starts with "v" (v0.1.0) also publishes a GitHub Release
+# with the .dmg attached.
+
+name: Build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  tests:
+    name: Tests (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libmupdf-dev libharfbuzz-dev libjbig2dec0-dev libopenjp2-7-dev \
+            libjpeg-dev liblcms2-dev libgumbo-dev libmujs-dev libfreetype-dev zlib1g-dev libfontconfig1-dev \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxext-dev libasound2-dev xvfb
+      - name: Core tests (real PDFs read note by note)
+        run: |
+          cmake -B build-core -G Ninja -DANS_BUILD_APP=OFF -DANS_SYSTEM_MUPDF=ON -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-core
+          ctest --test-dir build-core --output-on-failure
+      - name: The app compiles
+        run: |
+          cmake -B build -G Ninja -DANS_SYSTEM_MUPDF=ON -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --target AccurateNotationScanner
+      - name: Picture of the window
+        run: |
+          Xvfb :99 -screen 0 1600x1000x24 &
+          sleep 2
+          cd Tests/fixtures
+          DISPLAY=:99 "../../build/AccurateNotationScanner_artefacts/Release/Accurate Notation Scanner" \
+            --screenshot "$GITHUB_WORKSPACE/window.png" --select 0 ms_haydn_opus1no1_movement1.pdf ly_bach_bwv187.7.pdf scanned.pdf
+      - uses: actions/upload-artifact@v4
+        with:
+          name: window
+          path: window.png
+
+  mupdf-from-source:
+    name: MuPDF built from source (Linux), as on the Mac
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Core and tests, with MuPDF compiled from its pinned source
+        run: |
+          cmake -B build-src -G Ninja -DANS_BUILD_APP=OFF -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-src
+          ctest --test-dir build-src --output-on-failure
+      - name: Convert a fixture with the command-line tool
+        run: ./build-src/notation-scan Tests/fixtures/ly_bach_bwv187.7.pdf -o chorale.musicxml && head -c 600 chorale.musicxml
+
+  macos:
+    name: macOS app
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ninja
+        run: brew install ninja
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+      - name: Build (MuPDF, then the app and the tests)
+        run: cmake --build build --target AccurateNotationScanner ScannerTests notation-scan
+      - name: Tests
+        run: ctest --test-dir build --output-on-failure -V
+      - name: Package
+        run: |
+          APP="build/AccurateNotationScanner_artefacts/Release/Accurate Notation Scanner.app"
+          lipo -info "$APP/Contents/MacOS/Accurate Notation Scanner"
+          # An ad-hoc signature: enough for an Apple silicon Mac to run it.
+          # (No Apple Developer ID yet, so the first launch needs right-click > Open.)
+          codesign --force --deep --sign - "$APP"
+          mkdir -p dmg
+          cp -R "$APP" dmg/
+          ln -s /Applications dmg/Applications
+          cp docs/INSTALL-MAC.txt "dmg/Read me first.txt"
+          made=0
+          for attempt in 1 2 3 4 5; do
+            hdiutil create -volname "Accurate Notation Scanner" -srcfolder dmg -ov -format UDZO AccurateNotationScanner-macOS.dmg && { made=1; break; }
+            echo "hdiutil failed (attempt $attempt), trying again"
+            sleep 10
+          done
+          [ "$made" = 1 ]
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AccurateNotationScanner-macOS
+          path: AccurateNotationScanner-macOS.dmg
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: AccurateNotationScanner-macOS.dmg

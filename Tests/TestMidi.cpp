@@ -1,0 +1,242 @@
+// The score as it sounds, and as a MIDI file.
+#include "Check.h"
+#include "Convert.h"
+#include "Midi.h"
+
+#include <functional>
+#include <map>
+
+#include <fstream>
+#include <sstream>
+
+using namespace ans;
+
+TEST ("Written pitches become MIDI note numbers")
+{
+    CHECK_EQ (midiPitch ({ 0, 4, 0 }), 60);      // middle C
+    CHECK_EQ (midiPitch ({ 5, 4, 0 }), 69);      // A4
+    CHECK_EQ (midiPitch ({ 3, 4, 1 }), 66);      // F#4
+    CHECK_EQ (midiPitch ({ 6, 3, -1 }), 58);     // B-flat 3
+}
+
+TEST ("Part names choose instruments")
+{
+    CHECK_EQ (programFor ("Violin I"), 40);
+    CHECK_EQ (programFor ("Vc."), 42);
+    CHECK_EQ (programFor ("Viola"), 41);
+    CHECK_EQ (programFor ("Piano"), 0);
+    CHECK_EQ (programFor ("Soprano"), 52);
+    CHECK_EQ (programFor ("Clarinet in B-flat"), 71);
+}
+
+TEST ("Every sounding note of a read score is played once, ties joined")
+{
+    const auto c = convertPdf (std::string (ANS_FIXTURES) + "/ms_haydn_opus1no1_movement1.pdf");
+    const auto perf = perform (c.read.score);
+    // the truth's notes that start a sound: not rests, not the end of a tie
+    std::ifstream in (std::string (ANS_FIXTURES) + "/ms_haydn_opus1no1_movement1.notes");
+    // per bar (lines are "S1 B12: ..."), then counted as often as the bar is played
+    std::map<int, int> soundingInBar;
+    for (std::string line; std::getline (in, line);)
+    {
+        const auto colon = line.find (':');
+        const int bar = std::stoi (line.substr (line.find (" B") + 2, colon)) - 1;
+        std::stringstream items (line.substr (colon + 1));
+        for (std::string item; std::getline (items, item, ';');)
+        {
+            std::stringstream f (item);
+            std::string onset, pitch, length, tie;
+            f >> onset >> pitch >> length >> tie;
+            if (pitch.empty() || pitch == "rest" || tie == "stop" || tie == "continue") continue;
+            ++soundingInBar[bar];
+        }
+    }
+    // The order the bars are played in, from MuseScore's own MusicXML of this
+    // score (written out here, not taken from the code under test): a pickup
+    // and bars 1-24 twice, bars 25-63 twice, then 64-65.
+    std::vector<int> order;
+    for (int pass = 0; pass < 2; ++pass) for (int b = 0; b <= 24; ++b) order.push_back (b);
+    for (int pass = 0; pass < 2; ++pass) for (int b = 25; b <= 63; ++b) order.push_back (b);
+    order.push_back (64);
+    order.push_back (65);
+    CHECK (perf.barPlayed == order);
+    int sounding = 0, graceNotes = 0;   // grace notes are played, though the truth's list leaves them out
+    for (int b : order)
+    {
+        sounding += soundingInBar[b];
+        for (const auto& part : c.read.score.parts)
+            for (const auto& e : part.measures[static_cast<size_t> (b)].events)
+                if (e.grace) graceNotes += static_cast<int> (e.notes.size());
+    }
+    CHECK_EQ (static_cast<int> (perf.notes.size()), sounding + graceNotes);
+    CHECK (perf.length() > 0);
+    CHECK_EQ (perf.barStart.size(), perf.barPlayed.size() + 1);
+}
+
+TEST ("A MIDI file has a header, a tempo track and a track per part")
+{
+    const auto c = convertPdf (std::string (ANS_FIXTURES) + "/ms_random005.pdf");
+    const auto file = toMidiFile (c.read.score, perform (c.read.score));
+    CHECK (file.rfind ("MThd", 0) == 0);
+    const int tracks = (static_cast<unsigned char> (file[10]) << 8) | static_cast<unsigned char> (file[11]);
+    CHECK_EQ (tracks, static_cast<int> (c.read.score.parts.size()) + 1);
+    int found = 0;
+    for (size_t at = file.find ("MTrk"); at != std::string::npos; at = file.find ("MTrk", at + 4)) ++found;
+    CHECK_EQ (found, tracks);
+}
+
+TEST ("The tempo comes from the metronome mark")
+{
+    // MuseScore printed "quarter = 100" over the Beach song (decision: tempo read from the page)
+    const auto c = convertPdf (std::string (ANS_FIXTURES) + "/ms_beach_prayer_of_a_tired_child.pdf");
+    CHECK (c.read.score.quartersPerMinute > 0);
+}
+
+namespace
+{
+ans::Score barsWith (int n, std::function<void (std::vector<ans::Measure>&)> mark)
+{
+    ans::Score s;
+    s.parts.resize (1);
+    s.parts[0].measures.resize (static_cast<size_t> (n));
+    mark (s.parts[0].measures);
+    return s;
+}
+
+void ending (ans::Measure& first, ans::Measure& last, const char* number, bool closed)
+{
+    first.left.ending = ans::Barline::Ending::Start;
+    first.left.endingNumber = number;
+    last.right.ending = closed ? ans::Barline::Ending::Stop : ans::Barline::Ending::Discontinue;
+    last.right.endingNumber = number;
+}
+} // namespace
+
+TEST ("Repeats are played twice, and first and second endings in turn")
+{
+    // |: 0 1 | 2 :| 3 |   (2 is the first ending, 3 the second) then 4 |: 5 :|
+    const auto s = barsWith (6, [] (auto& m) {
+        ending (m[2], m[2], "1", true);
+        m[2].right.repeat = true;
+        ending (m[3], m[3], "2", false);
+        m[5].left.repeat = true;
+        m[5].right.repeat = true;
+    });
+    CHECK (ans::playOrder (s) == (std::vector<int> { 0, 1, 2, 0, 1, 3, 4, 5, 5 }));
+
+    // endings "1., 2." and "3.": three times round
+    const auto t = barsWith (3, [] (auto& m) {
+        ending (m[1], m[1], "1, 2", true);
+        m[1].right.repeat = true;
+        ending (m[2], m[2], "3", false);
+    });
+    CHECK (ans::playOrder (t) == (std::vector<int> { 0, 1, 0, 1, 0, 2 }));
+
+    // no repeats: as written
+    CHECK (ans::playOrder (barsWith (3, [] (auto&) {})) == (std::vector<int> { 0, 1, 2 }));
+}
+
+namespace
+{
+ans::Score violinAndPiano (const char* dynamic)
+{
+    ans::Score s;
+    s.quartersPerMinute = 60;   // a quarter note is a second
+    s.parts.resize (2);
+    s.parts[0].name = "Violin";
+    s.parts[1].name = "Piano";
+    for (auto& part : s.parts)
+    {
+        part.measures.resize (1);
+        ans::Measure& m = part.measures[0];
+        m.time = ans::TimeSignature {};
+        ans::Event e;
+        e.duration = ans::Fraction (4);
+        ans::Note n;
+        n.pitch = { 0, 4, 0 };
+        e.notes.push_back (n);
+        m.events.push_back (e);
+        if (dynamic != nullptr)
+        {
+            ans::Direction d;
+            d.dynamics = dynamic;
+            m.directions.push_back (d);
+        }
+    }
+    return s;
+}
+} // namespace
+
+TEST ("Playback: a violin gets AutoCC's string curves; a piano gets none")
+{
+    // AutoCC strings: CC1 starts at 85 and swells by 31, scaled 10% by
+    // velocity (f is velocity 92): 85 + 31 * (0.9 + 0.1 * 92 / 127) = 115.2.
+    // CC7 is held at 94. As in Noterator, the printed dynamic reaches AutoCC
+    // only through velocity. (This test first moved AutoCC's start by the
+    // dynamic, 99 and 126: the user asked for Noterator's way on 2026-11-09.)
+    const auto perf = perform (violinAndPiano ("f"));
+    int firstCC1 = -1, topCC1 = -1, pianoControls = 0, cc7 = 0;
+    for (const auto& c : perf.controls)
+    {
+        if (c.part == 1) { ++pianoControls; continue; }
+        if (c.controller == 1 && firstCC1 < 0) firstCC1 = c.value;
+        if (c.controller == 1) topCC1 = std::max (topCC1, c.value);
+        if (c.controller == 7) { ++cc7; CHECK_EQ (c.value, 94); }
+    }
+    CHECK_EQ (firstCC1, 85);
+    CHECK_EQ (topCC1, 115);
+    CHECK_EQ (cc7, 1);
+    CHECK_EQ (pianoControls, 0);
+}
+
+TEST ("Playback: notes written end to end let go, and AutoCC carries the line on (as Noterator)")
+{
+    // Four quarter notes at a second each. Each is its own key, so between
+    // them every key is up for an instant; the next starts within AutoCC's
+    // 0.4 s, so the line is carried on: the lane holds the level the first
+    // note reached and does not swell again, until the last key goes up.
+    ans::Score s;
+    s.quartersPerMinute = 60;
+    s.parts.resize (1);
+    s.parts[0].name = "Violin";
+    s.parts[0].measures.resize (1);
+    s.parts[0].measures[0].time = ans::TimeSignature {};
+    for (int k = 0; k < 4; ++k)
+    {
+        ans::Event e;
+        e.offset = ans::Fraction (k);
+        e.duration = ans::Fraction (1);
+        ans::Note n;
+        n.pitch = { k, 4, 0 };
+        e.notes.push_back (n);
+        s.parts[0].measures[0].events.push_back (e);
+    }
+    const auto perf = perform (s);
+    auto cc1At = [&] (double quarters) {
+        int v = -1;
+        for (const auto& c : perf.controls) if (c.controller == 1 && c.start <= quarters + 1e-9) v = c.value;
+        return v;
+    };
+    CHECK (cc1At (0.9) > 85 && cc1At (0.9) < 115);   // rising through the first note
+    CHECK_EQ (cc1At (1.5), cc1At (1.0));               // then held, not swelling again
+    CHECK_EQ (cc1At (3.9), cc1At (1.0));
+    CHECK_EQ (cc1At (5.2), 85);                         // back to the floor a second after the last key
+}
+
+TEST ("The MIDI file carries the curves in the violin's track")
+{
+    const auto score = violinAndPiano ("f");
+    const auto file = toMidiFile (score, perform (score));
+    // tracks: conductor, violin, piano; a controller message is 0xB0 | channel
+    std::vector<size_t> starts;
+    for (size_t at = file.find ("MTrk"); at != std::string::npos; at = file.find ("MTrk", at + 4)) starts.push_back (at);
+    CHECK_EQ (starts.size(), size_t (3));
+    if (starts.size() == 3)
+    {
+        const auto violin = file.substr (starts[1], starts[2] - starts[1]);
+        const auto piano = file.substr (starts[2]);
+        CHECK (violin.find (std::string ("\xb0\x01", 2)) != std::string::npos);   // CC1 on channel 1
+        CHECK (violin.find (std::string ("\xb0\x0b", 2)) != std::string::npos);   // CC11
+        CHECK (piano.find ('\xb1') == std::string::npos);                         // nothing on the piano's channel 2
+    }
+}
