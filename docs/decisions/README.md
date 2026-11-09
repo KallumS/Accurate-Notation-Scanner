@@ -17,3 +17,4 @@ numbered, not edited to stay true: a reversed decision gains a pointer.
 | [0010](0010-endings-read-and-repeats-played.md) | First and second endings are read; repeats are played | Accepted |
 | [0011](0011-chords-each-bar-outlines.md) | The chords each bar outlines: ScaleView Pro's reader, an analysis apart from the reading | Accepted |
 | [0012](0012-autocc-curves-in-playback.md) | AutoCC's controller curves in playback and MIDI export | Accepted |
+| [0013](0013-instruments-and-concert-pitch.md) | Instruments from the part names; transposing parts at concert pitch when the page shows them transposed | Accepted |

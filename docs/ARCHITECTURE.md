@@ -39,6 +39,13 @@ PDF ──MuPDF──▶ PageInk ──Layout──▶ staves, systems, parts, b
   comments at the top of `Reader.h`), then the whole-score passes: tie
   consistency, multi-bar rests expanded, pickup bar, the bar check.
 - **MusicXml** writes partwise MusicXML 4.0 with exact divisions.
+- **Instruments** names each part's instrument from its printed label
+  (Noterator's table) and how it is written against how it sounds (0013).
+- **Chords** is ScaleView Pro's chord reader; **Harmony** uses it to name
+  the chords each bar outlines - an analysis, never written into the
+  MusicXML (0011).
+- **AutoCC** is AutoCC's controller-curve engine, run by Midi for the
+  sustaining instruments (0012).
 - **Midi** turns the Score into sound: `playOrder()` follows repeats and
   endings, `perform()` makes the notes (ties joined, dynamics, an instrument
   per part), `toMidiFile()` writes them; the app's player plays the same

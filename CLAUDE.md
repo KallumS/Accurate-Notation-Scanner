@@ -79,7 +79,9 @@ ANS_DEBUG_TIES=1  build-core/notation-scan x.pdf --stdout -q    # every curve an
 - `Xml.*` is Noterator's, copied; keep them alike.
 - **Playback reads the Score, never the PDF** (0008): `Midi.cpp`'s
   `perform()` is the one place notes become sound, for the app and for
-  export alike. Pitches are as written (no transposition).
+  export alike. A part sounds at concert pitch only where the page shows it
+  transposed (its key signature against the score's, 0013); otherwise as
+  written. AutoCC's curves come with it (0012).
 - The audio thread does not allocate or lock (`Player.cpp`): the sequence
   is swapped in whole.
 
@@ -95,6 +97,16 @@ ANS_DEBUG_TIES=1  build-core/notation-scan x.pdf --stdout -q    # every curve an
   `tools/bigcorpus.py lilypond ... --resume` (keeps finished pieces).
 - Endings (voltas) are read and repeats are played (0010); sideways pages
   are turned upright (`PageInk::quarterTurns`, the app turns the picture).
+- Chords each bar outlines (0011): ScaleView Pro's reader, ported exactly
+  (52,800 voicings checked against the Lua); 59.7% of beats agree with the
+  DCML Mozart analysts' root (ceiling ~72% naming notes alone). Shown with
+  the app's Chords button; never written into the MusicXML.
+- AutoCC's curves in playback and MIDI export (0012). Not yet run against
+  the JSFX itself (needs the ysfx host built; not allowed in the sandbox).
+  Noterator has its own AutoCC port that releases between written notes;
+  this one treats joined notes as one gesture - worth reconciling.
+- Instruments from part names, transposition from key signatures (0013):
+  96/96 parts right on `tools/transposingscore.py` engravings.
 - The Mac CI job is cancelled by GitHub before it starts (account's Mac
   runners); the Linux jobs, including MuPDF built from source, pass. The
   user builds with `build-mac.command` until that is fixed.
