@@ -2,7 +2,9 @@
 
 A Mac app (Apple silicon, JUCE) that reads PDF scores made by notation
 programs into MusicXML - exactly, or it says where it is unsure. Scanned and
-handwritten pages are refused. One of the family with Noterator, Miderator
+handwritten pages, and pictures (PNG, JPEG), are refused (0001, 0009). It
+also plays the score through the Mac's own General MIDI instruments and
+exports MIDI (0008). One of the family with Noterator, Miderator
 and Starting Blocks; its MusicXML is meant to open in Noterator.
 
 The user is not a developer. Explain in plain words, show pictures of what
@@ -26,6 +28,11 @@ cmake -B build-core -G Ninja -DANS_BUILD_APP=OFF -DANS_SYSTEM_MUPDF=ON && cmake 
 cmake -B build -G Ninja -DANS_SYSTEM_MUPDF=ON -DCMAKE_BUILD_TYPE=Release && cmake --build build --target AccurateNotationScanner
 # a picture of the window, no screen needed (start Xvfb :99 first)
 DISPLAY=:99 "build/AccurateNotationScanner_artefacts/Release/Accurate Notation Scanner" --screenshot out.png --select 0 a.pdf b.pdf
+# the large-corpus check (OpenScore Lieder/Quartets, DCML, music21's corpus; see docs/ACCURACY.md)
+ANS_SCANNER=build-core/notation-scan python3 tools/bigcorpus.py musescore out/ path/to/scores --jobs 4
+python3 tools/bigcorpus.py lilypond out/ path/to/*.ly    # Mutopia: LilyPond's MIDI is the truth; runs code in .ly files, sandbox only
+# MIDI out of a PDF
+build-core/notation-scan x.pdf --midi x.mid
 # the accuracy check: engrave known music, read it back, compare (needs mscore3, lilypond, musicxml2ly, pip music21)
 python3 tools/corpus.py --sets bach,real,random --count 40
 python3 tools/flagcheck.py corpus-out musescore    # wrong bars that were NOT marked
@@ -64,3 +71,22 @@ ANS_DEBUG_TIES=1  build-core/notation-scan x.pdf --stdout -q    # every curve an
 - **Every issue carries its page and box**: the app outlines it, so a
   message without a place is no use to the user.
 - `Xml.*` is Noterator's, copied; keep them alike.
+- **Playback reads the Score, never the PDF** (0008): `Midi.cpp`'s
+  `perform()` is the one place notes become sound, for the app and for
+  export alike. Pitches are as written (no transposition).
+- The audio thread does not allocate or lock (`Player.cpp`): the sequence
+  is swapped in whole.
+
+## Where things stand (2026-11-09)
+
+- 2,506 test pieces, 3.79 million notes: 94.0% read exactly (docs/ACCURACY.md).
+  Biggest remaining silent errors: ties vs slurs between equal notes,
+  cross-staff piano writing, a second voice starting mid-bar.
+- Mutopia (LilyPond sources, MIDI truth): 40-piece sample 81.8% exact,
+  86.5% right pitch in sequence; the full ~1,900 run was in progress when
+  the session ended - rerun with `tools/bigcorpus.py lilypond`.
+- The Mac CI job is cancelled by GitHub before it starts (account's Mac
+  runners); the Linux jobs, including MuPDF built from source, pass. The
+  user builds with `build-mac.command` until that is fixed.
+- The user is sending Dorico, Sibelius and Finale PDFs: run them through
+  `notation-scan` and `tools/flagcheck.py`-style checks; add fixtures.

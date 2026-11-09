@@ -12,3 +12,5 @@ numbered, not edited to stay true: a reversed decision gains a pointer.
 | [0005](0005-a-juce-app-like-the-family.md) | A JUCE app, in the family's look | Accepted |
 | [0006](0006-accuracy-measured-by-round-trips.md) | Accuracy is measured by engraving known music and reading it back | Accepted |
 | [0007](0007-check-the-window-with-a-screenshot.md) | The window is checked with a screenshot | Accepted |
+| [0008](0008-playback-and-midi-from-the-read-score.md) | Playback and MIDI export, from the read score | Accepted |
+| [0009](0009-pictures-are-not-read.md) | Pictures (PNG, JPEG) are not read | Accepted |
