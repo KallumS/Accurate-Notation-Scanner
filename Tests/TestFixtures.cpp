@@ -106,8 +106,48 @@ TEST ("MuseScore: Lift Every Voice") { checkFixture ("ms_johnson_j_r_lift_every_
 TEST ("MuseScore: Bach chorale with horn, BWV 1.6") { checkFixture ("ms_bach_bwv1.6"); }
 TEST ("MuseScore: random score 2") { checkFixture ("ms_random002"); }
 TEST ("MuseScore: random score 5") { checkFixture ("ms_random005"); }
+TEST ("MuseScore: Kinkel, Op. 10 No. 3 (first and second endings)") { checkFixture ("ms_kinkel_op10no3"); }
 TEST ("LilyPond: Monteverdi madrigal") { checkFixture ("ly_monteverdi_madrigal.3.1"); }
 TEST ("LilyPond: Bach chorale BWV 187.7") { checkFixture ("ly_bach_bwv187.7"); }
+
+namespace
+{
+// Each volta as "bar:start 1." / "bar:stop 1" / "bar:discontinue 2", in order.
+std::vector<std::string> endingsOf (const Score& score)
+{
+    std::vector<std::string> out;
+    const auto& ms = score.parts.front().measures;
+    for (size_t b = 0; b < ms.size(); ++b)
+    {
+        if (ms[b].left.ending == Barline::Ending::Start) out.push_back (std::to_string (b) + ":start " + ms[b].left.endingText);
+        if (ms[b].right.ending == Barline::Ending::Stop) out.push_back (std::to_string (b) + ":stop " + ms[b].right.endingNumber);
+        if (ms[b].right.ending == Barline::Ending::Discontinue) out.push_back (std::to_string (b) + ":discontinue " + ms[b].right.endingNumber);
+    }
+    return out;
+}
+} // namespace
+
+TEST ("First and second endings are read, MuseScore and LilyPond alike")
+{
+    // MuseScore: a first and a second ending, both closed
+    const auto k = convertPdf (fixture ("ms_kinkel_op10no3.pdf"));
+    const auto ke = endingsOf (k.read.score);
+    CHECK_EQ (ke.size(), size_t (4));
+    if (ke.size() == 4)
+    {
+        CHECK (ke[0].find (":start 1.") != std::string::npos);
+        CHECK (ke[1].find (":stop 1") != std::string::npos);
+        CHECK (ke[2].find (":start 2.") != std::string::npos);
+        CHECK (ke[3].find (":stop 2") != std::string::npos);
+    }
+    // LilyPond: its digits come from a font with no Unicode table; the second ending is open
+    const auto c = convertPdf (fixture ("ly_carcassi_op60no24.pdf"));
+    const auto ce = endingsOf (c.read.score);
+    CHECK (ce == (std::vector<std::string> { "28:start 1.", "28:stop 1", "29:start 2.", "29:discontinue 2" }));
+    // every part carries them
+    for (const auto& part : c.read.score.parts)
+        CHECK (part.measures.size() > 29 && part.measures[29].left.ending == Barline::Ending::Start);
+}
 
 TEST ("A scanned PDF is refused, with the reason")
 {
