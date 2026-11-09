@@ -44,3 +44,31 @@ cancelled before starting on its first run (runner not given).
 - Lyrics and chord symbols; 8va lines read rather than marked.
 - Outlined-glyph PDFs (match against Bravura's outlines from Starting
   Blocks Notation) and the legacy Opus/Maestro fonts.
+
+## Later the same night: large corpora
+
+Asked to test against the largest collections with known notes. Ran, with
+`tools/bigcorpus.py` (MuseScore 3.2 engraving each file and exporting what it
+printed as the truth): OpenScore Lieder (1,332 songs), OpenScore String
+Quartets (119 movements), DCML Mozart sonatas (58) and Beethoven quartets
+(70), and music21's corpus (927). 2,506 pieces, 3.79 million notes, 94.0%
+exactly right; results in `docs/ACCURACY.md`.
+
+What the big runs found, in order of size:
+
+- A third of the Lieder used Bravura's oversized noteheads (U+F4BE, an
+  optional glyph outside SMuFL's core table): no notes were read at all.
+  Font-specific optional glyphs are now named (`SmuflOptional.inc`), and
+  any music symbol that cannot be named is reported.
+- "Hide empty staves": a song opening with the piano alone lost the singer.
+  Parts are now matched across systems by label (and abbreviation), staves
+  and clefs, with new parts added where they first appear.
+- Triplets with the "3" left off; time signatures for parts shown late.
+- A slur between D-flat and D read as a tie, carrying the flat: bars where
+  only a tie carries an accidental are now marked.
+
+Blocked here, and why: newer MuseScore (3.6, 4) and running LilyPond on the
+Mutopia Project's files both count as running outside code in this sandbox;
+the user can allow them. MuseScore 3.5+ files were opened by marking copies
+as the older format. The from-source MuPDF build now passes on Linux CI; the
+Mac CI job is cancelled by GitHub before it starts, every time.
