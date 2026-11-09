@@ -209,14 +209,9 @@ def read_midi(path):
     return notes
 
 
-def notes_of_musicxml(path, expand=False):
+def notes_of_musicxml(path):
     from music21 import converter, note, chord
     s = converter.parse(path)
-    if expand:
-        try:
-            s = s.expandRepeats()
-        except Exception:
-            return None
     out = []
     for p in s.parts:
         flat = p.stripTies().flatten()
@@ -321,8 +316,13 @@ def check_midi(args):
         tl = max(o + d for o, p, d in truth)
         gl = max((o + d for o, p, d in got), default=0)
         if tl > gl * 1.15:
+            # the app's own MIDI plays the repeats (Midi.cpp playOrder); it
+            # plays notes 95% long, so their written lengths are put back
+            expanded = None
+            mid = pdf[:-4] + ".played.mid"
             try:
-                expanded = notes_of_musicxml(read, expand=True)
+                subprocess.run([SCANNER, pdf, "--midi", mid, "-o", os.devnull, "-q"], capture_output=True, timeout=300)
+                expanded = [(o, p, round(d / 0.95 * 48) / 48) for o, p, d in read_midi(mid)]
             except Exception:
                 expanded = None
             if expanded and compare_aligned(truth, expanded)[0] > compare_aligned(truth, got)[0]:
