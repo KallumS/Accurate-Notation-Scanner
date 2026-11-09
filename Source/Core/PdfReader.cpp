@@ -121,6 +121,7 @@ struct Recorder
 {
     fz_device super;
     PageInk* page;
+    int glyphsFacing[4] = { 0, 0, 0, 0 };   // music glyphs by which way they face, in quarter turns
 };
 
 PageInk& pageOf (fz_device* dev) { return *reinterpret_cast<Recorder*> (dev)->page; }
@@ -220,6 +221,8 @@ void recordText (fz_context* ctx, fz_device* dev, const fz_text* text, fz_matrix
             if (! naming.name.empty())
             {
                 flush();
+                const double angle = std::atan2 (m.b, m.a) * 180.0 / 3.14159265358979;
+                ++reinterpret_cast<Recorder*> (dev)->glyphsFacing[((static_cast<int> (std::lround (-angle / 90.0)) % 4) + 4) % 4];
                 Glyph g;
                 g.name = naming.name;
                 g.origin = { m.e, m.f };
@@ -313,8 +316,18 @@ fz_document* openDocument (fz_context* ctx, const std::string& path, std::string
     }
     return doc;
 }
+// Turns a page's drawing a number of quarter turns clockwise, keeping it at 0,0.
+fz_matrix turned (fz_rect bounds, int quarterTurns)
+{
+    const fz_matrix r = fz_rotate (static_cast<float> (90 * quarterTurns));
+    const fz_rect b = fz_transform_rect (bounds, r);
+    return fz_concat (r, fz_translate (-b.x0, -b.y0));
+}
+
 // Runs one page through the recording device. False if MuPDF gave up on it.
-bool readPage (fz_context* ctx, fz_document* doc, int index, PageInk& ink)
+// A score drawn turned on its page (LilyPond's landscape setting draws it
+// sideways on an upright page) is read again, turned back upright.
+bool readPage (fz_context* ctx, fz_document* doc, int index, PageInk& ink, int quarterTurns = -1)
 {
     fz_page* page = nullptr;
     fz_device* dev = nullptr;
@@ -322,12 +335,17 @@ bool readPage (fz_context* ctx, fz_document* doc, int index, PageInk& ink)
     fz_var (page);
     fz_var (dev);
     fz_var (ok);
+    int again = 0;   // quarter turns to read it again with
+    fz_var (again);
     fz_try (ctx)
     {
         page = fz_load_page (ctx, doc, index);
         const fz_rect bounds = fz_bound_page (ctx, page);
-        ink.width = bounds.x1 - bounds.x0;
-        ink.height = bounds.y1 - bounds.y0;
+        const int turns = std::max (0, quarterTurns);
+        const fz_rect shown = fz_transform_rect (bounds, turned (bounds, turns));
+        ink.width = shown.x1 - shown.x0;
+        ink.height = shown.y1 - shown.y0;
+        ink.quarterTurns = turns;
 
         auto* rec = fz_new_derived_device (ctx, Recorder);
         rec->page = &ink;
@@ -339,8 +357,16 @@ bool readPage (fz_context* ctx, fz_document* doc, int index, PageInk& ink)
         rec->super.fill_image_mask = recordImageMask;
         dev = &rec->super;
 
-        fz_run_page (ctx, page, dev, fz_identity, nullptr);
+        fz_run_page (ctx, page, dev, turned (bounds, turns), nullptr);
         fz_close_device (ctx, dev);
+        if (quarterTurns < 0)
+        {
+            const auto* facing = rec->glyphsFacing;
+            int most = 0;
+            for (int k = 1; k < 4; ++k) if (facing[k] > facing[most]) most = k;
+            const int all = facing[0] + facing[1] + facing[2] + facing[3];
+            if (most != 0 && facing[most] * 2 > all) again = most;   // read it again, turned
+        }
     }
     fz_always (ctx)
     {
@@ -349,6 +375,13 @@ bool readPage (fz_context* ctx, fz_document* doc, int index, PageInk& ink)
     }
     fz_catch (ctx)
         ok = false;
+    if (ok && again > 0)
+    {
+        const int number = ink.number;
+        ink = PageInk {};
+        ink.number = number;
+        return readPage (ctx, doc, index, ink, again);
+    }
     return ok;
 }
 } // namespace
@@ -402,7 +435,7 @@ int pageCount (const std::string& path)
     return n;
 }
 
-PageImage renderPage (const std::string& path, int pageIndex, double scale, std::string* error)
+PageImage renderPage (const std::string& path, int pageIndex, double scale, std::string* error, int quarterTurns)
 {
     PageImage out;
     Context c;
@@ -416,7 +449,18 @@ PageImage renderPage (const std::string& path, int pageIndex, double scale, std:
     fz_try (ctx)
     {
         const auto s = static_cast<float> (scale);
-        pix = fz_new_pixmap_from_page_number (ctx, doc, pageIndex, fz_scale (s, s), fz_device_rgb (ctx), 0);
+        fz_matrix m = fz_scale (s, s);
+        if (quarterTurns != 0)
+        {
+            fz_page* page = fz_load_page (ctx, doc, pageIndex);
+            fz_try (ctx)
+                m = fz_concat (turned (fz_bound_page (ctx, page), quarterTurns), m);
+            fz_always (ctx)
+                fz_drop_page (ctx, page);
+            fz_catch (ctx)
+                fz_rethrow (ctx);
+        }
+        pix = fz_new_pixmap_from_page_number (ctx, doc, pageIndex, m, fz_device_rgb (ctx), 0);
         out.width = fz_pixmap_width (ctx, pix);
         out.height = fz_pixmap_height (ctx, pix);
         const int stride = fz_pixmap_stride (ctx, pix);

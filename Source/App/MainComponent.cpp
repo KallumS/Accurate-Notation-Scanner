@@ -67,11 +67,13 @@ void PagePreview::render()
                        ? static_cast<float> (juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->scale) : 1.0f;
     // First a cheap render to learn the page's width.
     std::string err;
-    auto probe = renderPage (job->pdf.getFullPathName().toStdString(), page, 0.1, &err);
+    const auto& pages = job->result.read.pages;
+    const int turns = page >= 0 && static_cast<size_t> (page) < pages.size() ? pages[static_cast<size_t> (page)].quarterTurns : 0;
+    auto probe = renderPage (job->pdf.getFullPathName().toStdString(), page, 0.1, &err, turns);
     if (probe.width <= 0) return;
     const double pageWidth = probe.width / 0.1;
     scale = (getWidth() - 24) / pageWidth;
-    auto img = renderPage (job->pdf.getFullPathName().toStdString(), page, scale * pixels, &err);
+    auto img = renderPage (job->pdf.getFullPathName().toStdString(), page, scale * pixels, &err, turns);
     if (img.width <= 0) return;
     juce::Image out (juce::Image::RGB, img.width, img.height, false);
     juce::Image::BitmapData bd (out, juce::Image::BitmapData::writeOnly);

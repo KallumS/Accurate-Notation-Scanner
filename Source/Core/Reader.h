@@ -30,6 +30,7 @@ struct PageVerdict
 {
     enum Kind { Music, Scanned, NoMusic, Unreadable } kind = NoMusic;
     std::string reason;
+    int quarterTurns = 0;      // as PageInk: show the page turned this way so the marks line up
 };
 
 struct ReadResult

@@ -36,7 +36,9 @@ struct PageImage
     std::vector<std::uint8_t> rgb;   // width * height * 3
 };
 
-PageImage renderPage (const std::string& path, int pageIndex, double scale, std::string* error = nullptr);
+// quarterTurns turns it clockwise, as the reader did a page drawn sideways
+// (PageInk::quarterTurns), so what was read lines up with the picture.
+PageImage renderPage (const std::string& path, int pageIndex, double scale, std::string* error = nullptr, int quarterTurns = 0);
 
 int pageCount (const std::string& path);
 

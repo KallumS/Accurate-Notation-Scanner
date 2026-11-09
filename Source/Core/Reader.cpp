@@ -1941,7 +1941,23 @@ SystemRead PageReader::readSystem (int systemIndex, std::vector<StaffState>& sta
                     }
                     else if (it.dir == -1) down.push_back (ii);
                     else if (it.dir == 1) up.push_back (ii);
-                    else ((it.y0 + it.y1) * 0.5 < mid ? up : down).push_back (ii);
+                    else
+                    {
+                        // no stem (a whole note): with the voice it stands above or
+                        // below at the same moment, else by its place on the staff
+                        const double cy = (it.y0 + it.y1) * 0.5;
+                        int side = 0;
+                        for (int o : normals)
+                        {
+                            const auto& other = items[static_cast<size_t> (o)];
+                            if (o == ii || (! other.rest && other.dir == 0) || std::abs (other.x - it.x) >= 0.7 * sp) continue;
+                            if (cy < other.y0) side = side == -1 ? 2 : 1;          // above what sounds with it
+                            else if (cy > other.y1) side = side == 1 ? 2 : -1;     // below it
+                        }
+                        if (side == 1) up.push_back (ii);
+                        else if (side == -1) down.push_back (ii);
+                        else (cy < mid ? up : down).push_back (ii);
+                    }
                 }
                 auto byX = [&] (int a, int b) { return items[static_cast<size_t> (a)].x < items[static_cast<size_t> (b)].x; };
                 std::sort (up.begin(), up.end(), byX);
@@ -2432,6 +2448,7 @@ ReadResult readScore (const std::vector<PageInk>& pages)
     {
         const auto layout = findLayout (page);
         auto verdict = judgePage (page, layout);
+        verdict.quarterTurns = page.quarterTurns;
         result.pages.push_back (verdict);
         if (verdict.kind != PageVerdict::Music)
         {

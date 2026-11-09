@@ -110,6 +110,8 @@ struct PageInk
 {
     int number = 0;                // 0-based
     double width = 0, height = 0;
+    int quarterTurns = 0;          // the music was drawn turned on the page; it was read
+                                   // turned back this many quarter turns clockwise
     std::vector<Glyph> glyphs;
     std::vector<Text> texts;
     std::vector<Segment> segments;
