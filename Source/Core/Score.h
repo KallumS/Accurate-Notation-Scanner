@@ -172,6 +172,7 @@ struct Part
 struct Score
 {
     std::string title, composer;
+    double quartersPerMinute = 0;   // from the first metronome mark or tempo word; 0 if none
     std::vector<Part> parts;
 };
 

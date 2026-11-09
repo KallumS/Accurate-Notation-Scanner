@@ -105,6 +105,15 @@ void PagePreview::paint (juce::Graphics& g)
     g.setOpacity (1.0f);
     g.drawImage (image, area);
 
+    // The bar being played.
+    for (const auto& b : playing)
+    {
+        const juce::Rectangle<float> r (area.getX() + static_cast<float> (b.x0 * scale), area.getY() + static_cast<float> (b.y0 * scale),
+                                        static_cast<float> (b.width() * scale), static_cast<float> (b.height() * scale));
+        g.setColour (theme::accent.withAlpha (0.28f));
+        g.fillRect (r);
+    }
+
     // The bars that need a look.
     const auto& issues = job->result.read.issues;
     for (size_t i = 0; i < issues.size(); ++i)
@@ -140,8 +149,12 @@ void PagePreview::mouseUp (const juce::MouseEvent& e)
 
 MainComponent::MainComponent()
 {
-    for (auto* b : { &openButton, &saveButton, &saveAllButton, &revealButton, &noteratorButton, &prevPage, &nextPage })
+    for (auto* b : { &openButton, &saveButton, &midiButton, &saveAllButton, &revealButton, &noteratorButton, &playButton, &prevPage, &nextPage })
         addAndMakeVisible (b);
+    playButton.setTooltip ("Play the score through the Mac's built-in instruments (Space)");
+    midiButton.setTooltip ("Save the chosen score as a MIDI file");
+    playButton.onClick = [this] { togglePlay(); };
+    midiButton.onClick = [this] { exportMidi(); };
     addAndMakeVisible (fileList);
     addAndMakeVisible (issueList);
     addAndMakeVisible (viewport);
@@ -176,12 +189,15 @@ MainComponent::MainComponent()
     nextPage.onClick = [this] { if (auto* j = job()) if (currentPage + 1 < j->pages) { ++currentPage; currentIssue = -1; refresh(); } };
     preview.onIssueClicked = [this] (int i) { showIssue (i); };
 
+    setWantsKeyboardFocus (true);
     setSize (1180, 820);
     refresh();
 }
 
 MainComponent::~MainComponent()
 {
+    stopTimer();
+    player.reset();
     pool.removeAllJobs (true, 10000);
 }
 
@@ -222,6 +238,7 @@ bool MainComponent::allDone() const
 
 void MainComponent::selectFile (int index)
 {
+    if (player != nullptr && player->isPlaying() && index != current) togglePlay();
     current = index;
     fileList.selectRow (index);   // calls back here; the row is already current
     currentPage = 0;
@@ -245,6 +262,8 @@ void MainComponent::refresh()
     auto* j = job();
     const bool ready = j != nullptr && j->done && j->result.verdict != Conversion::Rejected;
     saveButton.setEnabled (ready);
+    midiButton.setEnabled (ready);
+    playButton.setEnabled (ready || (player != nullptr && player->isPlaying()));
     revealButton.setEnabled (j != nullptr);
     bool anyReady = false;
     for (auto* o : jobs) anyReady = anyReady || (o->done && o->result.verdict != Conversion::Rejected);
@@ -326,11 +345,14 @@ void MainComponent::resized()
     top.removeFromLeft (8);
     saveButton.setBounds (top.removeFromLeft (150));
     top.removeFromLeft (8);
+    midiButton.setBounds (top.removeFromLeft (120));
+    top.removeFromLeft (8);
     saveAllButton.setBounds (top.removeFromLeft (100));
     top.removeFromLeft (8);
     revealButton.setBounds (top.removeFromLeft (130));
     top.removeFromLeft (8);
     if (noteratorButton.isVisible()) noteratorButton.setBounds (top.removeFromLeft (150));
+    playButton.setBounds (top.removeFromRight (90));
 
     const bool empty = jobs.isEmpty();
     fileList.setVisible (! empty);
@@ -505,6 +527,92 @@ void MainComponent::openInNoterator()
     juce::ChildProcess open;
     open.start (juce::StringArray { "/usr/bin/open", "-a", app.getFullPathName(), f.getFullPathName() });
     open.waitForProcessToFinish (5000);
+}
+
+} // namespace ans
+
+namespace ans
+{
+
+bool MainComponent::keyPressed (const juce::KeyPress& key)
+{
+    if (key == juce::KeyPress::spaceKey) { togglePlay(); return true; }
+    return false;
+}
+
+void MainComponent::togglePlay()
+{
+    if (player != nullptr && player->isPlaying())
+    {
+        player->stop();
+        stopTimer();
+        playButton.setButtonText ("Play");
+        playingBar = -1;
+        preview.showPlaying ({});
+        return;
+    }
+    auto* j = job();
+    if (j == nullptr || ! j->done || j->result.verdict == Conversion::Rejected) return;
+    if (player == nullptr) player = std::make_unique<Player>();
+    performance = perform (j->result.read.score);
+    const double from = 0;
+    player->play (performance, from);
+    playButton.setButtonText ("Stop");
+    playButton.setTooltip ("Playing through " + player->soundName() + ". Click to stop.");
+    startTimerHz (30);
+}
+
+void MainComponent::timerCallback()
+{
+    auto* j = job();
+    if (player == nullptr || j == nullptr || ! player->isPlaying())
+    {
+        stopTimer();
+        playButton.setButtonText ("Play");
+        playingBar = -1;
+        preview.showPlaying ({});
+        return;
+    }
+    const int bar = performance.barAt (performance.quarters (player->positionSeconds()));
+    if (bar == playingBar) return;
+    playingBar = bar;
+    std::vector<Box> boxes;
+    int page = -1;
+    for (const auto& part : j->result.read.score.parts)
+    {
+        if (bar >= static_cast<int> (part.measures.size())) continue;
+        for (const auto& place : part.measures[static_cast<size_t> (bar)].places)
+        {
+            if (page < 0) page = place.page;
+            if (place.page == page) boxes.push_back (place.box);
+        }
+    }
+    if (page < 0) return;
+    if (page != currentPage) { currentPage = page; currentIssue = -1; refresh(); }
+    preview.showPlaying (boxes);
+    // keep the bar in view
+    double top = 1e9;
+    for (const auto& b : boxes) top = std::min (top, b.y0);
+    const int y = static_cast<int> (top * preview.scaleToView());
+    if (y < viewport.getViewPositionY() || y > viewport.getViewPositionY() + viewport.getHeight() * 2 / 3)
+        viewport.setViewPosition (0, juce::jmax (0, y - viewport.getHeight() / 4));
+}
+
+void MainComponent::exportMidi()
+{
+    auto* j = job();
+    if (j == nullptr || ! j->done || j->result.verdict == Conversion::Rejected) return;
+    chooser = std::make_unique<juce::FileChooser> ("Export MIDI", j->pdf.withFileExtension ("mid"), "*.mid;*.midi");
+    chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::warnAboutOverwriting,
+                          [this, j] (const juce::FileChooser& fc) {
+                              const auto f = fc.getResult();
+                              if (f == juce::File()) return;
+                              const auto bytes = toMidiFile (j->result.read.score, perform (j->result.read.score));
+                              if (! f.replaceWithData (bytes.data(), bytes.size()))
+                                  juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
+                                      juce::String::fromUTF8 ("\xe2\x80\x9c") + f.getFileName() + juce::String::fromUTF8 ("\xe2\x80\x9d couldn\xe2\x80\x99t be saved."),
+                                      "Check that the folder can be written to, or choose another.");
+                          });
 }
 
 } // namespace ans

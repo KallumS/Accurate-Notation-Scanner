@@ -2147,7 +2147,7 @@ std::vector<SystemPart> systemParts (const PageInk& page, const PageLayout& layo
     std::vector<SystemPart> out;
     for (size_t k = 0; k < sys.staves.size(); ++k)
     {
-        if (k == 0 || sys.partOfStaff[k] != sys.partOfStaff[k - 1]) out.push_back ({ 0, {}, {} });
+        if (k == 0 || sys.partOfStaff[k] != sys.partOfStaff[k - 1]) out.push_back ({ 0, {}, {}, {} });
         auto& part = out.back();
         ++part.staves;
         const auto& staff = layout.staves[static_cast<size_t> (sys.staves[k])];
@@ -2180,6 +2180,51 @@ std::vector<SystemPart> systemParts (const PageInk& page, const PageLayout& layo
         k += static_cast<size_t> (part.staves);
     }
     return out;
+}
+
+// The first tempo on a page: a metronome mark ("quarter = 120"), else a
+// tempo word. In quarter notes per minute; 0 if there is none.
+double tempoOn (const PageInk& page)
+{
+    for (const auto& g : page.glyphs)
+    {
+        if (g.name.rfind ("metNote", 0) != 0) continue;
+        double unit = 0;
+        if (g.name.find ("Quarter") != std::string::npos) unit = 1;
+        else if (g.name.find ("Half") != std::string::npos) unit = 2;
+        else if (g.name.find ("Whole") != std::string::npos) unit = 4;
+        else if (g.name.find ("8th") != std::string::npos) unit = 0.5;
+        else if (g.name.find ("16th") != std::string::npos) unit = 0.25;
+        if (unit == 0) continue;
+        for (const auto& d : page.glyphs)
+            if (d.name == "metAugmentationDot" && d.box.x0 >= g.box.x1 - 1 && d.box.x0 < g.box.x1 + g.size * 0.3 && std::abs (d.origin.y - g.origin.y) < g.size * 0.3)
+                unit *= 1.5;
+        // the number after it, on the same line
+        const Text* best = nullptr;
+        for (const auto& t : page.texts)
+        {
+            if (t.box.x0 < g.box.x1 - 1 || t.box.x0 > g.box.x1 + g.size * 2.5) continue;
+            if (std::abs (t.box.y1 - g.origin.y) > g.size * 0.5 && std::abs (t.box.cy() - g.box.cy()) > g.size * 0.5) continue;
+            if (t.text.find_first_of ("0123456789") == std::string::npos) continue;
+            if (best == nullptr || t.box.x0 < best->box.x0) best = &t;
+        }
+        if (best == nullptr) continue;
+        const auto digits = best->text.substr (best->text.find_first_of ("0123456789"));
+        const double bpm = std::atof (digits.c_str());
+        if (bpm >= 20 && bpm <= 400) return bpm * unit;
+    }
+    static const std::pair<const char*, double> words[] = {
+        { "prestissimo", 200 }, { "presto", 168 }, { "vivace", 156 }, { "allegro", 132 }, { "allegretto", 112 },
+        { "moderato", 108 }, { "andantino", 96 }, { "andante", 84 }, { "adagietto", 72 }, { "adagio", 66 },
+        { "larghetto", 60 }, { "lento", 56 }, { "largo", 50 }, { "grave", 44 } };
+    for (const auto& t : page.texts)
+    {
+        std::string w;
+        for (char c : t.text) w += static_cast<char> (std::tolower (static_cast<unsigned char> (c)));
+        for (const auto& [name, q] : words)
+            if (w.rfind (name, 0) == 0) return q;
+    }
+    return 0;
 }
 
 PageVerdict judgePage (const PageInk& page, const PageLayout& layout)
@@ -2282,6 +2327,8 @@ ReadResult readScore (const std::vector<PageInk>& pages)
         if (page.unnamedMusicGlyphs > 0)
             result.issues.push_back ({ Issue::Warning, page.number, { 0, 0, page.width, page.height }, -1, -1,
                                       std::to_string (page.unnamedMusicGlyphs) + " music symbols on this page could not be named and were left out; check the page." });
+
+        if (result.score.quartersPerMinute <= 0) result.score.quartersPerMinute = tempoOn (page);
 
         PageReader reader (page, layout);
         reader.prepare();

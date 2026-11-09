@@ -3,12 +3,14 @@
 //   notation-scan score.pdf                  writes score.musicxml beside it
 //   notation-scan score.pdf -o out.musicxml  writes there
 //   notation-scan score.pdf --report r.json  also writes the report
+//   notation-scan score.pdf --midi s.mid     also writes a MIDI file
 //   notation-scan score.pdf --stdout         prints the MusicXML
 //
 // Exit status: 0 every bar checked out, 1 converted with things to look at,
 // 2 not converted (a scan, no music, or not a PDF).
 
 #include "Convert.h"
+#include "Midi.h"
 
 #include <cstdio>
 #include <cstring>
@@ -17,18 +19,19 @@
 
 int main (int argc, char** argv)
 {
-    std::string input, output, report;
+    std::string input, output, report, midi;
     bool toStdout = false, quiet = false;
     for (int i = 1; i < argc; ++i)
     {
         const std::string a = argv[i];
         if ((a == "-o" || a == "--output") && i + 1 < argc) output = argv[++i];
         else if (a == "--report" && i + 1 < argc) report = argv[++i];
+        else if (a == "--midi" && i + 1 < argc) midi = argv[++i];
         else if (a == "--stdout") toStdout = true;
         else if (a == "-q" || a == "--quiet") quiet = true;
         else if (a == "-h" || a == "--help")
         {
-            std::printf ("usage: notation-scan score.pdf [-o out.musicxml] [--report report.json] [--stdout] [-q]\n");
+            std::printf ("usage: notation-scan score.pdf [-o out.musicxml] [--report report.json] [--midi out.mid] [--stdout] [-q]\n");
             return 0;
         }
         else input = a;
@@ -54,6 +57,7 @@ int main (int argc, char** argv)
         std::fprintf (stderr, "%s\n", c.summary().c_str());
         return 2;
     }
+    if (! midi.empty()) std::ofstream (midi, std::ios::binary) << ans::toMidiFile (c.read.score, ans::perform (c.read.score));
     if (toStdout) std::fwrite (c.musicXml.data(), 1, c.musicXml.size(), stdout);
     else std::ofstream (output, std::ios::binary) << c.musicXml;
 

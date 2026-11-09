@@ -27,6 +27,7 @@ add_library(ScannerCore STATIC
     Source/Core/Layout.cpp
     Source/Core/Reader.cpp
     Source/Core/MusicXml.cpp
+    Source/Core/Midi.cpp
     Source/Core/Convert.cpp
     Source/Core/Xml.cpp)
 target_include_directories(ScannerCore PUBLIC Source/Core)
@@ -46,7 +47,8 @@ if(ANS_BUILD_TESTS)
         Tests/TestMain.cpp
         Tests/TestGlyphs.cpp
         Tests/TestShapes.cpp
-        Tests/TestFixtures.cpp)
+        Tests/TestFixtures.cpp
+        Tests/TestMidi.cpp)
     target_link_libraries(ScannerTests PRIVATE ScannerCore)
     target_compile_definitions(ScannerTests PRIVATE ANS_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/Tests/fixtures")
     add_test(NAME Core COMMAND ScannerTests)

@@ -11,6 +11,8 @@
 #pragma once
 
 #include "Convert.h"
+#include "Midi.h"
+#include "Player.h"
 
 #include <juce_gui_extra/juce_gui_extra.h>
 
@@ -34,6 +36,8 @@ class PagePreview : public juce::Component
 {
 public:
     void show (Job* job, int page, int selectedIssue);
+    void showPlaying (std::vector<Box> boxes) { playing = std::move (boxes); repaint(); }
+    double scaleToView() const { return scale; }
     void paint (juce::Graphics&) override;
     void resized() override { image = {}; }
     void mouseUp (const juce::MouseEvent&) override;
@@ -43,6 +47,7 @@ public:
 private:
     Job* job = nullptr;
     int page = 0, selected = -1;
+    std::vector<Box> playing;   // the bar being played, on this page
     juce::Image image;
     double scale = 1.0;
     void render();
@@ -50,7 +55,8 @@ private:
 
 class MainComponent : public juce::Component,
                       public juce::FileDragAndDropTarget,
-                      private juce::ListBoxModel
+                      private juce::ListBoxModel,
+                      private juce::Timer
 {
 public:
     MainComponent();
@@ -69,6 +75,8 @@ public:
     // draw the window into a PNG.
     bool allDone() const;
     void selectFile (int index);
+    void play() { if (player == nullptr || ! player->isPlaying()) togglePlay(); }
+    bool keyPressed (const juce::KeyPress&) override;
 
 private:
     juce::OwnedArray<Job> jobs;
@@ -78,6 +86,7 @@ private:
 
     juce::TextButton openButton { ui ("Open\xe2\x80\xa6") }, saveButton { ui ("Save MusicXML\xe2\x80\xa6") },
                      saveAllButton { "Save All" }, revealButton { "Show in Finder" }, noteratorButton { "Open in Noterator" },
+                     playButton { "Play" }, midiButton { ui ("Export MIDI\xe2\x80\xa6") },
                      prevPage { ui ("\xe2\x80\xb9") }, nextPage { ui ("\xe2\x80\xba") };
     juce::ListBox fileList { "Files", this };
 
@@ -101,6 +110,12 @@ private:
     void saveCurrent();
     void saveAll();
     void openInNoterator();
+    void togglePlay();
+    void exportMidi();
+    void timerCallback() override;
+    std::unique_ptr<Player> player;
+    Performance performance;
+    int playingBar = -1;
     juce::File noteratorApp() const;
     static juce::String ui (const char* s) { return juce::String::fromUTF8 (s); }
 

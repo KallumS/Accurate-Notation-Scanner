@@ -3,7 +3,8 @@
     and PDFs handed over by the Finder (dropped on the Dock icon, or "Open
     With") or on the command line.
 
-    --screenshot out.png file.pdf... opens the files, waits for them to be
+    --screenshot out.png [--select N] [--play seconds] file.pdf... opens the
+    files, waits for them to be
     read, draws the window into a PNG and quits: how the window is checked
     without a screen (decision 0007).
 */
@@ -55,6 +56,7 @@ public:
         if (shot >= 0 && shot + 1 < args.size())
         {
             screenshot = juce::File::getCurrentWorkingDirectory().getChildFile (args[shot + 1]);
+            if (args.indexOf ("--play") >= 0) { playFor = args[args.indexOf ("--play") + 1].getIntValue(); args.removeRange (args.indexOf ("--play"), 2); }
             const int select = args.indexOf ("--select");
             if (select >= 0 && select + 1 < args.size()) selectAfter = args[select + 1].getIntValue();
             args.removeRange (shot, 2);
@@ -93,6 +95,7 @@ private:
     std::unique_ptr<MainWindow> window;
     juce::File screenshot;
     int selectAfter = -1;
+    int playFor = 0;     // seconds of playback before the picture
     int waited = 0;
 
     void timerCallback() override
@@ -103,8 +106,10 @@ private:
             window->content->selectFile (selectAfter);
             selectAfter = -1;
             waited = 1000;
+            if (playFor > 0) window->content->play();
             return;
         }
+        if (playFor > 0 && waited < 1000 + playFor * 1000 / 300) { ++waited; return; }
         stopTimer();
         auto image = window->content->createComponentSnapshot (window->content->getLocalBounds(), true, 1.0f);
         juce::FileOutputStream out (screenshot);
