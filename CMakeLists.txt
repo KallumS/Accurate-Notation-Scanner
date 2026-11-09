@@ -29,6 +29,7 @@ add_library(ScannerCore STATIC
     Source/Core/MusicXml.cpp
     Source/Core/Midi.cpp
     Source/Core/Convert.cpp
+    Source/Core/Chords.cpp
     Source/Core/Xml.cpp)
 target_include_directories(ScannerCore PUBLIC Source/Core)
 target_link_libraries(ScannerCore PUBLIC mupdf)
@@ -48,7 +49,8 @@ if(ANS_BUILD_TESTS)
         Tests/TestGlyphs.cpp
         Tests/TestShapes.cpp
         Tests/TestFixtures.cpp
-        Tests/TestMidi.cpp)
+        Tests/TestMidi.cpp
+        Tests/TestChords.cpp)
     target_link_libraries(ScannerTests PRIVATE ScannerCore)
     target_compile_definitions(ScannerTests PRIVATE ANS_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/Tests/fixtures")
     add_test(NAME Core COMMAND ScannerTests)
