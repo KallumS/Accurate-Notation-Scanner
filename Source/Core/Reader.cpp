@@ -884,6 +884,13 @@ void PageReader::findTies()
             for (int b : ends) std::fprintf (stderr, " %d(x%.1f l%d)", b, heads[static_cast<size_t> (b)].x0, heads[static_cast<size_t> (b)].line);
             std::fprintf (stderr, " -> %d %d\n", bestA, bestB);
         }
+        if (bestA >= 0 && std::getenv ("ANS_DEBUG_TIES") != nullptr)
+        {
+            const auto& A = heads[static_cast<size_t> (bestA)]; const auto& B = heads[static_cast<size_t> (bestB)];
+            std::fprintf (stderr, "TIE p%d L dx %.2f dy %.2f  R dx %.2f dy %.2f  h %.2f w %.2f\n", page.number + 1,
+                          (cv.left.x - A.x1) / sp, (cv.left.y - A.y) / sp, (cv.right.x - B.x0) / sp, (cv.right.y - B.y) / sp,
+                          cv.box.height() / sp, cv.box.width() / sp);
+        }
         if (bestA >= 0)
         {
             ties.push_back ({ bestA, bestB, false, false });
@@ -899,9 +906,12 @@ void PageReader::findTies()
                 if (! startUsed[static_cast<size_t> (a)] && heads[static_cast<size_t> (a)].x1 < cv.right.x)
                 {
                     if (heads[static_cast<size_t> (a)].small) continue;
-                    bool beyond = false;   // its note is the staff's last in this system
+                    bool beyond = false;   // its note is its voice's last in this system
+                    const int ia = headItem[static_cast<size_t> (a)];
+                    const int dir = ia >= 0 ? items[static_cast<size_t> (ia)].dir : 0;
                     for (const auto& it : items)
-                        beyond = beyond || (it.staff == heads[static_cast<size_t> (a)].staff && ! it.small && it.x > heads[static_cast<size_t> (a)].x1 - 0.1 * sp);
+                        beyond = beyond || (it.staff == heads[static_cast<size_t> (a)].staff && ! it.small && it.x > heads[static_cast<size_t> (a)].x1 - 0.1 * sp
+                                            && (it.rest || it.dir == 0 || dir == 0 || it.dir == dir));
                     if (beyond) continue;
                     ties.push_back ({ a, -1, true, false });
                     startUsed[static_cast<size_t> (a)] = true;
@@ -919,9 +929,12 @@ void PageReader::findTies()
                     earlier = earlier || (heads[h].staff == heads[static_cast<size_t> (b)].staff && heads[h].x1 < cv.left.x + 0.1 * sp && heads[h].line == heads[static_cast<size_t> (b)].line);
                 if (earlier) continue;
                 if (heads[static_cast<size_t> (b)].small) continue;
-                bool firstThing = true; // the curve starts before every note on the staff
+                bool firstThing = true; // the curve starts before every note of its voice
+                const int ib = headItem[static_cast<size_t> (b)];
+                const int dirB = ib >= 0 ? items[static_cast<size_t> (ib)].dir : 0;
                 for (const auto& it : items)
-                    firstThing = firstThing && ! (it.staff == heads[static_cast<size_t> (b)].staff && it.x <= cv.left.x);
+                    firstThing = firstThing && ! (it.staff == heads[static_cast<size_t> (b)].staff && it.x <= cv.left.x && ! it.small
+                                                  && (it.rest || it.dir == 0 || dirB == 0 || it.dir == dirB));
                 if (! firstThing) continue;
                 ties.push_back ({ -1, b, false, true });
                 endUsed[static_cast<size_t> (b)] = true;
@@ -1921,6 +1934,35 @@ SystemRead PageReader::readSystem (int systemIndex, std::vector<StaffState>& sta
             }
         }
         st.time = time;
+    }
+
+    // 8va and 15ma lines are not read yet: mark the bars where one starts.
+    for (int k = 0; k < nStaves; ++k)
+    {
+        const int si = sys.staves[static_cast<size_t> (k)];
+        const auto& staff = layout.staves[static_cast<size_t> (si)];
+        std::vector<Box> marks;
+        for (size_t i = 0; i < page.glyphs.size(); ++i)
+        {
+            const auto& n = page.glyphs[i].name;
+            if (glyphStaff[i] == si && (n.rfind ("ottava", 0) == 0 || n.rfind ("quindicesima", 0) == 0 || n.rfind ("ventiduesima", 0) == 0))
+                marks.push_back (page.glyphs[i].box);
+        }
+        for (const auto& t : page.texts)
+        {
+            const auto& x = t.text;
+            if (! (x.rfind ("8v", 0) == 0 || x.rfind ("15m", 0) == 0 || x.rfind ("22m", 0) == 0)) continue;
+            if (nearestStaff (t.box.cx(), t.box.cy()) != si) continue;
+            marks.push_back (t.box);
+        }
+        for (const auto& b : marks)
+        {
+            const int bar = barOf (b.cx());
+            if (bar >= 0)
+                out.staves[static_cast<size_t> (k)][static_cast<size_t> (bar)].problems.push_back (
+                    { Issue::Error, "An octave line (8va or similar) starts here; it is not read yet, so the notes under it are an octave off." });
+        }
+        (void) staff;
     }
 
     // Dynamics: letters next to each other make one marking.

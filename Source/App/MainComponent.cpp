@@ -222,15 +222,18 @@ bool MainComponent::allDone() const
 
 void MainComponent::selectFile (int index)
 {
-    fileList.selectRow (index);
     current = index;
+    fileList.selectRow (index);   // calls back here; the row is already current
     currentPage = 0;
     currentIssue = -1;
-    // open on the first page that needs a look
-    if (auto* j = job(); j != nullptr && j->done)
-        for (const auto& is : j->result.read.issues)
-            if (is.page >= 0 && is.level != Issue::Info) { currentPage = is.page; break; }
     refresh();
+    // open on the first bar that needs a look
+    if (auto* j = job(); j != nullptr && j->done)
+        for (size_t i = 0; i < j->result.read.issues.size(); ++i)
+        {
+            const auto& is = j->result.read.issues[i];
+            if (is.page >= 0 && is.level != Issue::Info && ! is.box.empty()) { showIssue (static_cast<int> (i)); break; }
+        }
 }
 
 void MainComponent::refresh()
