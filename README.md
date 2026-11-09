@@ -58,16 +58,22 @@ notes and rhythms are right, but a slur between two equal notes was read as
 a tie or the other way round - they are drawn the same way. Dense piano
 writing that passes between the two staves is the other weak spot.
 
+LilyPond's own scores, the whole Mutopia Project (1,473 pieces, 1.35 million
+notes, checked against LilyPond's MIDI): 76.7% of notes have the right pitch
+in the right order; the median piece is 97.5% right. Large orchestral scores
+are where it is weakest.
+
 ## What it reads
 
 Notes and chords, rests, dots, ties, slurs, tuplets, grace notes, clefs
 (including octave clefs and clef changes), key and time signatures and their
-changes, two voices on a staff, grand staves, repeats, multi-bar rests,
-pickup bars, accents, staccato, tenuto, fermatas and other articulations,
+changes, two voices on a staff, grand staves, repeats and first/second
+endings (played as written), two-note tremolos, multi-bar rests,
+pickup bars, pages printed sideways, accents, staccato, tenuto, fermatas and other articulations,
 dynamics, part names, title and composer.
 
 Not yet: lyrics, chord symbols, 8va lines (the bar where one starts is marked),
-tremolos, guitar tablature, cross-staff notes, three or more voices on one
+single-note tremolos, D.C./D.S. jumps, guitar tablature, cross-staff notes, three or more voices on one
 staff, and fonts that put music on ordinary letters (old Sibelius Opus and
 Finale Maestro scores) - those PDFs are refused rather than misread.
 

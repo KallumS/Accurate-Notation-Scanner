@@ -81,14 +81,65 @@ Fixes found by these runs, each measured before and after:
 | Time signature shared across parts | a part first shown later no longer defaults to 4/4 |
 | Ties that carry an accidental are marked | wrong pitches no longer pass silently |
 
+## LilyPond's own scores: the Mutopia Project
+
+All 1,930 `.ly` files in the Mutopia Project archive were engraved with
+LilyPond 2.24 (old files brought up to date with `convert-ly`); 1,584 gave
+one PDF and one MIDI file. LilyPond's MIDI is the truth: every note's pitch
+and start. It is a looser truth than MuseScore's MusicXML:
+
+- **Lengths do not compare.** The MIDI plays staccato notes short and
+  articulates others, so "right pitch, in sequence" is the fair measure.
+- **Repeats.** Many files ask the MIDI to play the repeats; the read score
+  is then played the same way, by the app's own MIDI export (0010).
+- **Not the page.** 97 files make their MIDI from a separate, transposed
+  copy of the music (Bach organ works doubled in octaves for a "registration",
+  transposing instruments at concert pitch). They are left out. Chord
+  symbols, which LilyPond's MIDI also plays, are silenced before engraving.
+- Old sources brought up to date by `convert-ly` do not always engrave as
+  their author meant (a symphony printed with its barlines missing); those
+  pages are read as printed.
+
+| | |
+| --- | ---: |
+| Pieces read (of 1,487) | 1,473 (1 refused, 13 could not be compared) |
+| Notes | 1,352,906 |
+| **Notes with the right pitch, in sequence** | **76.7%** |
+| Median piece | 97.5% |
+| Pieces 99% or better | 581 |
+| Pieces under 3,000 notes (1,394) | 86.0% |
+| Pieces of 3,000 notes or more (79: symphonies, concertos, opera) | 57.2% |
+| Pieces reported "every bar checked out" (392) | 96.3% |
+
+| Composer | Pieces | Notes | Right pitch, in sequence |
+| --- | ---: | ---: | ---: |
+| Beethoven | 66 | 260,970 | 51.4% |
+| Bach | 299 | 221,015 | 91.4% |
+| Schubert | 47 | 122,900 | 60.2% |
+| Verdi | 20 | 56,000 | 84.2% |
+| Mozart | 36 | 51,623 | 76.7% |
+| Chopin | 34 | 40,977 | 78.8% |
+| Handel | 47 | 36,076 | 98.4% |
+| Traditional (folk dances, tunes) | 120 | 32,778 | 91.9% |
+| Joplin | 13 | 27,199 | 98.4% |
+| Sor (guitar) | 69 | 26,647 | 81.0% |
+
+What the Mutopia run changed in the reader:
+
+| Fix | Effect |
+| --- | --- |
+| Pages drawn sideways (LilyPond's landscape paper) are turned upright | 90 of the first 91 refusals were this; refusals 99 → 1 |
+| First and second endings (voltas) are read and played (0010) | a Swedish dance 41.9% → 100% |
+| LilyPond's digits in fonts with no Unicode table read by glyph name | volta numbers, fingerings |
+| A whole note joins the voice it sounds with | organ chorales' long notes no longer overflow the lower voice |
+| Two-note tremolos (MuseScore) | the 115 Lieder with tremolos 86.8% → 89.4% |
+
+Large orchestral scores are the weak spot: many staves, transposing
+instruments, divided parts, cue notes. Tremolos in LilyPond's drawing
+(slashes across a stem) and D.C./D.S. jumps are not read yet.
+
 ## Not yet tested
 
-- **LilyPond's own scores (the Mutopia Project, ~1,900 pieces).** The plan
-  was to engrave each with LilyPond and use LilyPond's MIDI as the truth
-  (pitch, onset, length of every note). LilyPond 2.24 removed its safe mode,
-  so engraving third-party `.ly` files runs code from them; the session's
-  sandbox refused that without the user's say-so. `tools/bigcorpus.py
-  lilypond` is ready for it.
 - **MuseScore 4, Dorico, Sibelius, Finale PDFs.** Only MuseScore 3 and
   LilyPond engravings were available. Dorico, Finale 27+ and Sibelius with
   Bravura/Petaluma use the same SMuFL symbols, so the reading is the same;

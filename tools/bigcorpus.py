@@ -365,7 +365,29 @@ def check_midi_isolated(args):
 
 # ---------------------------------------------------------------- summary
 
+def midi_differs_from_page(ly):
+    """True when a .ly makes its MIDI from a separate score that transposes
+    the music (an organ registration doubled in octaves, a transposing
+    instrument at concert pitch): its MIDI is then not the printed page."""
+    text = open(ly, encoding="utf-8", errors="replace").read()
+    text = re.sub(r"%\{.*?%\}", "", text, flags=re.S)
+    text = re.sub(r"%[^\n]*", "", text)
+    scores = []
+    for m in re.finditer(r"\\score\s*\{", text):
+        j, depth = m.end(), 1
+        while j < len(text) and depth:
+            depth += (text[j] == "{") - (text[j] == "}")
+            j += 1
+        scores.append(text[m.start():j])
+    midi_only = [s for s in scores if "\\midi" in s and "\\layout" not in s]
+    return len(scores) > 1 and any("\\transpose" in s for s in midi_only)
+
+
 def summarise(results, mode):
+    differs = [r for r in results if r.get("midi_differs")]
+    if differs:
+        print(f"left out: {len(differs)} pieces whose MIDI is made from a transposed copy of the music, not the page")
+    results = [r for r in results if not r.get("midi_differs")]
     read = [r for r in results if r["status"] == "read"]
     rejected = [r for r in results if r["status"] == "rejected"]
     failed = [r for r in results if r["status"] not in ("read", "rejected")]
@@ -401,6 +423,7 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--resume", action="store_true", help="keep the results a stopped run already has")
+    ap.add_argument("--redo", default="", help="names (comma-separated) to engrave and check again, with --resume")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     base = os.path.commonpath([os.path.abspath(p) for p in a.inputs]) if len(a.inputs) > 1 else os.path.abspath(a.inputs[0])
@@ -413,6 +436,11 @@ def main():
         files = [(f, name_of(os.path.abspath(f), base)) for f in gather(a.inputs, (".ly",), a.limit)]
         d = os.path.join(a.out, "pdf")
         os.makedirs(d, exist_ok=True)
+        redo = set(x for x in a.redo.split(",") if x)
+        for n in redo:   # engraved again, from scratch
+            for ext in (".pdf", ".midi", ".failed"):
+                if os.path.exists(os.path.join(d, n + ext)):
+                    os.remove(os.path.join(d, n + ext))
         with ThreadPoolExecutor(a.jobs) as ex:
             list(ex.map(engrave_lilypond, [(f, n, d) for f, n in files]))
         triples = [(n, os.path.join(d, n + ".pdf"), os.path.join(d, n + ".midi")) for f, n in files if os.path.exists(os.path.join(d, n + ".pdf"))]
@@ -422,7 +450,8 @@ def main():
         if a.resume and os.path.exists(progress):
             for line in open(progress):
                 r = json.loads(line)
-                done[r["name"]] = r
+                if r["name"] not in redo:
+                    done[r["name"]] = r
         elif os.path.exists(progress):
             os.remove(progress)
         todo = [t for t in triples if t[0] not in done]
@@ -435,6 +464,9 @@ def main():
             return r
         with ThreadPoolExecutor(a.jobs) as ex:
             results = list(done.values()) + list(ex.map(check_and_keep, todo))
+        differs = {n for f, n in files if midi_differs_from_page(f)}
+        for r in results:
+            r["midi_differs"] = r["name"] in differs
     with open(os.path.join(a.out, "results.jsonl"), "w") as f:
         for r in results:
             f.write(json.dumps(r) + "\n")

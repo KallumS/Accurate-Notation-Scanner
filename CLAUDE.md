@@ -82,9 +82,13 @@ ANS_DEBUG_TIES=1  build-core/notation-scan x.pdf --stdout -q    # every curve an
 - 2,506 test pieces, 3.79 million notes: 94.0% read exactly (docs/ACCURACY.md).
   Biggest remaining silent errors: ties vs slurs between equal notes,
   cross-staff piano writing, a second voice starting mid-bar.
-- Mutopia (LilyPond sources, MIDI truth): 40-piece sample 81.8% exact,
-  86.5% right pitch in sequence; the full ~1,900 run was in progress when
-  the session ended - rerun with `tools/bigcorpus.py lilypond`.
+- Mutopia (LilyPond sources, MIDI truth), whole archive: 1,473 pieces,
+  1.35M notes, 76.7% right pitch in sequence, median piece 97.5%
+  (docs/ACCURACY.md). Weakest: big orchestral scores (57%). Not read yet:
+  LilyPond's single-note tremolo slashes, D.C./D.S. Rerun with
+  `tools/bigcorpus.py lilypond ... --resume` (keeps finished pieces).
+- Endings (voltas) are read and repeats are played (0010); sideways pages
+  are turned upright (`PageInk::quarterTurns`, the app turns the picture).
 - The Mac CI job is cancelled by GitHub before it starts (account's Mac
   runners); the Linux jobs, including MuPDF built from source, pass. The
   user builds with `build-mac.command` until that is fixed.
