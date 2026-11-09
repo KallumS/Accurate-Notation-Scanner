@@ -1438,6 +1438,7 @@ SystemRead PageReader::readSystem (int systemIndex, std::vector<StaffState>& sta
                             if ((key > 0 ? sharpOrder[k2] : flatOrder[k2]) == n.pitch.step) alter = key > 0 ? 1 : -1;
                         const auto found = barAlter.find (diatonic);
                         if (found != barAlter.end()) alter = found->second;
+                        const int alterWithoutTie = alter;
                         if (tiedIn)
                         {
                             // A tied note keeps the pitch it was tied from.
@@ -1450,6 +1451,11 @@ SystemRead PageReader::readSystem (int systemIndex, std::vector<StaffState>& sta
                                     alter = ot.pitch.alter;
                         }
                         n.pitch.alter = alter;
+                        // Only the tie says this note keeps its accidental. A slur
+                        // between the same two notes looks the same, and would
+                        // make it a different note: say so.
+                        if (tiedIn && alter != alterWithoutTie)
+                            bar.problems.push_back ({ Issue::Warning, "A tie carries an accidental into this bar. If the curve is a slur rather than a tie, the note is a semitone different; check it." });
                     }
                     if (std::abs (hd.step - hd.line) > 0.3)
                         bar.problems.push_back ({ Issue::Warning, "A notehead sits between a line and a space." });
