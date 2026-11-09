@@ -127,6 +127,15 @@ std::string toMusicXml (const Score& score)
     const long long div = divisionsFor (score);
     auto ticks = [&] (Fraction f) { return f.n * (div / f.d); };
 
+    auto writeEnding = [&] (const Barline& b) {
+        if (b.ending == Barline::Ending::None) return;
+        const char* type = b.ending == Barline::Ending::Start ? "start" : b.ending == Barline::Ending::Stop ? "stop" : "discontinue";
+        if (b.ending == Barline::Ending::Start && ! b.endingText.empty())
+            w.leaf ("ending", b.endingText, { { "number", b.endingNumber }, { "type", type } });
+        else
+            w.empty ("ending", { { "number", b.endingNumber }, { "type", type } });
+    };
+
     w.open ("score-partwise", { { "version", "4.0" } });
     if (! score.title.empty())
     {
@@ -166,6 +175,7 @@ std::string toMusicXml (const Score& score)
             {
                 w.open ("barline", { { "location", "left" } });
                 w.leaf ("bar-style", barStyleName (m.left.style));
+                writeEnding (m.left);
                 if (m.left.repeat) w.empty ("repeat", { { "direction", "forward" } });
                 w.close();
             }
@@ -394,10 +404,11 @@ std::string toMusicXml (const Score& score)
             for (size_t i = 0; i < laterClefs.size(); ++i)
                 if (! clefDone[i]) writeClefChanges (laterClefs[i]->staff, pos, true);
 
-            if (m.right.style != BarStyle::Regular || m.right.repeat)
+            if (m.right.style != BarStyle::Regular || m.right.repeat || m.right.ending != Barline::Ending::None)
             {
                 w.open ("barline", { { "location", "right" } });
                 w.leaf ("bar-style", barStyleName (m.right.style));
+                writeEnding (m.right);
                 if (m.right.repeat) w.empty ("repeat", { { "direction", "backward" } });
                 w.close();
             }

@@ -157,6 +157,24 @@ void appendUtf8 (std::string& out, int code)
     else { out += static_cast<char> (0xf0 | (c >> 18)); out += static_cast<char> (0x80 | ((c >> 12) & 0x3f)); out += static_cast<char> (0x80 | ((c >> 6) & 0x3f)); out += static_cast<char> (0x80 | (c & 0x3f)); }
 }
 
+// A font subset that lost its Unicode table still names its glyphs: LilyPond
+// writes volta and fingering numbers this way ("one", "period").
+unsigned letterFromGlyphName (const char* glyphName)
+{
+    // LilyPond's own digits: "fattened.one", "fattened.four.alt".
+    std::string base (glyphName);
+    if (base.rfind ("fattened.", 0) == 0) base = base.substr (9);
+    if (const auto dot = base.find ('.'); dot != std::string::npos && dot > 0) base = base.substr (0, dot);
+    const char* name = base.c_str();
+    static const char* const digits[] = { "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine" };
+    for (unsigned d = 0; d < 10; ++d)
+        if (std::strcmp (name, digits[d]) == 0) return '0' + d;
+    struct { const char* n; unsigned c; } const marks[] = { { "period", '.' }, { "comma", ',' }, { "plus", '+' }, { "hyphen", '-' }, { "space", ' ' } };
+    for (const auto& m : marks)
+        if (std::strcmp (name, m.n) == 0) return m.c;
+    return 0;
+}
+
 void recordText (fz_context* ctx, fz_device* dev, const fz_text* text, fz_matrix ctm,
                  fz_colorspace* cs, const float* color, float alpha, fz_color_params params)
 {
@@ -192,7 +210,8 @@ void recordText (fz_context* ctx, fz_device* dev, const fz_text* text, fz_matrix
 
             char glyphName[64] = { 0 };
             fz_get_glyph_name (ctx, font, item.gid, glyphName, sizeof glyphName);
-            const unsigned ucs = item.ucs > 0 ? static_cast<unsigned> (item.ucs) : 0u;
+            unsigned ucs = item.ucs > 0 && item.ucs != 0xFFFD ? static_cast<unsigned> (item.ucs) : 0u;
+            if (ucs == 0) ucs = letterFromGlyphName (glyphName);
             const auto naming = glyphs::name (fontName, ucs, glyphName);
 
             const fz_rect r = fz_bound_glyph (ctx, font, item.gid, m);

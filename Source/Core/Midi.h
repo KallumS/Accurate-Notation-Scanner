@@ -3,6 +3,9 @@
     quarter notes, its part, channel, General MIDI instrument and loudness.
     Used for playback (the app) and for MIDI export.
 
+    Repeats are played, and first and second endings taken in turn
+    (playOrder); D.C., D.S. and codas are not followed.
+
     Ties are joined into one note. Pitches are as written (MusicXML's
     convention; a transposing instrument is not moved). Grace notes are played
     short, just before their note. The tempo comes from the printed metronome
@@ -29,21 +32,26 @@ struct PlayedNote
     double start = 0;        // quarter notes from the beginning
     double length = 1;
     int velocity = 80;
-    int bar = 0;             // index of the bar it starts in
+    int bar = 0;             // index of the score's bar it starts in
 };
 
 struct Performance
 {
     std::vector<PlayedNote> notes;        // in start order
-    std::vector<double> barStart;         // quarter notes, one per bar, plus the end
+    std::vector<double> barStart;         // quarter notes, one per bar as played, plus the end
+    std::vector<int> barPlayed;           // the score's bar at each of those
     double quartersPerMinute = 100;
     std::vector<int> programOfPart;       // General MIDI program, 0-127
     std::vector<int> channelOfPart;       // 0-15, never 9 (drums)
     double length() const { return barStart.empty() ? 0.0 : barStart.back(); }
     double seconds (double quarters) const { return quarters * 60.0 / quartersPerMinute; }
     double quarters (double seconds) const { return seconds * quartersPerMinute / 60.0; }
-    int barAt (double quarters) const;
+    int barAt (double quarters) const;    // the score's bar sounding then
 };
+
+// The score's bars in the order they are played: each repeat twice (or as
+// many times as its endings' numbers ask), each ending on its own pass.
+std::vector<int> playOrder (const Score& score);
 
 Performance perform (const Score& score);
 

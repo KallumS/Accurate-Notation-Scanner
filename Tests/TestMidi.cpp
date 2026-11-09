@@ -3,6 +3,9 @@
 #include "Convert.h"
 #include "Midi.h"
 
+#include <functional>
+#include <map>
+
 #include <fstream>
 #include <sstream>
 
@@ -32,10 +35,12 @@ TEST ("Every sounding note of a read score is played once, ties joined")
     const auto perf = perform (c.read.score);
     // the truth's notes that start a sound: not rests, not the end of a tie
     std::ifstream in (std::string (ANS_FIXTURES) + "/ms_haydn_opus1no1_movement1.notes");
-    int sounding = 0;
+    // per bar (lines are "S1 B12: ..."), then counted as often as the bar is played
+    std::map<int, int> soundingInBar;
     for (std::string line; std::getline (in, line);)
     {
         const auto colon = line.find (':');
+        const int bar = std::stoi (line.substr (line.find (" B") + 2, colon)) - 1;
         std::stringstream items (line.substr (colon + 1));
         for (std::string item; std::getline (items, item, ';');)
         {
@@ -43,17 +48,22 @@ TEST ("Every sounding note of a read score is played once, ties joined")
             std::string onset, pitch, length, tie;
             f >> onset >> pitch >> length >> tie;
             if (pitch.empty() || pitch == "rest" || tie == "stop" || tie == "continue") continue;
-            ++sounding;
+            ++soundingInBar[bar];
         }
     }
-    int graceNotes = 0;   // played, though the truth's list leaves them out
-    for (const auto& part : c.read.score.parts)
-        for (const auto& m : part.measures)
-            for (const auto& e : m.events)
+    const auto& measures = c.read.score.parts.front().measures;
+    int sounding = 0, graceNotes = 0;   // grace notes are played, though the truth's list leaves them out
+    CHECK (perf.barPlayed.size() > measures.size());   // it has repeats
+    for (int b : perf.barPlayed)
+    {
+        sounding += soundingInBar[b];
+        for (const auto& part : c.read.score.parts)
+            for (const auto& e : part.measures[static_cast<size_t> (b)].events)
                 if (e.grace) graceNotes += static_cast<int> (e.notes.size());
+    }
     CHECK_EQ (static_cast<int> (perf.notes.size()), sounding + graceNotes);
     CHECK (perf.length() > 0);
-    CHECK_EQ (perf.barStart.size(), c.read.score.parts.front().measures.size() + 1);
+    CHECK_EQ (perf.barStart.size(), perf.barPlayed.size() + 1);
 }
 
 TEST ("A MIDI file has a header, a tempo track and a track per part")
@@ -73,4 +83,48 @@ TEST ("The tempo comes from the metronome mark")
     // MuseScore printed "quarter = 100" over the Beach song (decision: tempo read from the page)
     const auto c = convertPdf (std::string (ANS_FIXTURES) + "/ms_beach_prayer_of_a_tired_child.pdf");
     CHECK (c.read.score.quartersPerMinute > 0);
+}
+
+namespace
+{
+ans::Score barsWith (int n, std::function<void (std::vector<ans::Measure>&)> mark)
+{
+    ans::Score s;
+    s.parts.resize (1);
+    s.parts[0].measures.resize (static_cast<size_t> (n));
+    mark (s.parts[0].measures);
+    return s;
+}
+
+void ending (ans::Measure& first, ans::Measure& last, const char* number, bool closed)
+{
+    first.left.ending = ans::Barline::Ending::Start;
+    first.left.endingNumber = number;
+    last.right.ending = closed ? ans::Barline::Ending::Stop : ans::Barline::Ending::Discontinue;
+    last.right.endingNumber = number;
+}
+} // namespace
+
+TEST ("Repeats are played twice, and first and second endings in turn")
+{
+    // |: 0 1 | 2 :| 3 |   (2 is the first ending, 3 the second) then 4 |: 5 :|
+    const auto s = barsWith (6, [] (auto& m) {
+        ending (m[2], m[2], "1", true);
+        m[2].right.repeat = true;
+        ending (m[3], m[3], "2", false);
+        m[5].left.repeat = true;
+        m[5].right.repeat = true;
+    });
+    CHECK (ans::playOrder (s) == (std::vector<int> { 0, 1, 2, 0, 1, 3, 4, 5, 5 }));
+
+    // endings "1., 2." and "3.": three times round
+    const auto t = barsWith (3, [] (auto& m) {
+        ending (m[1], m[1], "1, 2", true);
+        m[1].right.repeat = true;
+        ending (m[2], m[2], "3", false);
+    });
+    CHECK (ans::playOrder (t) == (std::vector<int> { 0, 1, 0, 1, 0, 2 }));
+
+    // no repeats: as written
+    CHECK (ans::playOrder (barsWith (3, [] (auto&) {})) == (std::vector<int> { 0, 1, 2 }));
 }

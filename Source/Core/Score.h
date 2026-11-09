@@ -137,6 +137,13 @@ struct Barline
 {
     BarStyle style = BarStyle::Regular;
     bool repeat = false;           // forward on a left barline, backward on a right one
+
+    // A volta (first/second-time bracket): starts on a left barline, stops
+    // (with a hook down) or is left open (discontinue) on a right one.
+    enum class Ending { None, Start, Stop, Discontinue };
+    Ending ending = Ending::None;
+    std::string endingNumber;      // MusicXML's: "1", "2", "1, 2"
+    std::string endingText;        // as printed: "1.", "1., 2."
 };
 
 // Where a bar is on the page, per staff: for showing what was read.

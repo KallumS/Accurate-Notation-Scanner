@@ -238,6 +238,15 @@ struct StaffBar
     std::vector<std::pair<Issue::Level, std::string>> problems;
 };
 
+// A volta bracket over bars of one system.
+struct VoltaRead
+{
+    int first = 0, last = 0;       // bars of the system
+    std::string number, text;      // empty when it continues one from the system before
+    bool closed = false;           // a hook down at its right end
+    bool toEnd = false;            // runs on to the system's end, open
+};
+
 struct SystemRead
 {
     int page = 0;
@@ -249,6 +258,7 @@ struct SystemRead
     std::vector<bool> hasLeft;
     std::vector<std::string> staffNames;
     std::vector<Clef> openingClef;               // per staff
+    std::vector<VoltaRead> voltas;
 };
 
 // What carries from one system to the next, per staff of a part.
@@ -1036,6 +1046,139 @@ std::vector<BarRange> barRanges (const System& sys)
     return out;
 }
 
+// A volta's label: "1.", "2.", "1., 2.", "1.-3.", "1. und 3. Strophe" -> its
+// numbers ("1, 2, 3"), or "" when the text is not one. Without a full stop
+// ("1") it must be upright: an italic digit by a bracket is a tuplet's.
+std::string voltaNumbers (const std::string& text, bool italic = false)
+{
+    if (text.size() > 40) return {};
+    std::vector<int> numbers;
+    bool range = false, stop = false;
+    size_t i = 0;
+    while (i < text.size())
+    {
+        const char c = text[i];
+        if (std::isdigit (static_cast<unsigned char> (c)))
+        {
+            int n = 0;
+            while (i < text.size() && std::isdigit (static_cast<unsigned char> (text[i]))) n = n * 10 + (text[i++] - '0');
+            if (n < 1 || n > 9) return {};
+            if (range && ! numbers.empty())
+                for (int k = numbers.back() + 1; k < n; ++k) numbers.push_back (k);
+            range = false;
+            numbers.push_back (n);
+            continue;
+        }
+        if (c == '.') stop = true;
+        else if (c == '-') range = true;
+        else if (static_cast<unsigned char> (c) == 0xE2 && i + 2 < text.size()) { range = true; i += 3; continue; }   // an en dash
+        else if (std::isalpha (static_cast<unsigned char> (c))) range = false;   // "und", "Strophe", "time"
+        else if (c != ',' && c != ' ' && c != '&' && c != '+') return {};
+        ++i;
+    }
+    if (numbers.empty() || (! stop && italic)) return {};
+    std::string out;
+    for (size_t k = 0; k < numbers.size(); ++k)
+    {
+        if (k > 0 && numbers[k] <= numbers[k - 1]) return {};
+        out += (k ? ", " : "") + std::to_string (numbers[k]);
+    }
+    return out;
+}
+
+// Volta brackets above the staves of a system: a thin line with a hook down
+// at its left end and its number under it; the hook at the right end is
+// there when the ending closes. A line with neither number nor left hook at
+// the start of a system carries on the bracket from the system before.
+std::vector<VoltaRead> findVoltas (const PageInk& page, const PageLayout& layout, const System& sys, const std::vector<BarRange>& ranges)
+{
+    std::vector<VoltaRead> out;
+    if (ranges.empty()) return out;
+    auto barOf = [&] (double x) {
+        for (size_t r = 0; r < ranges.size(); ++r)
+            if (x >= ranges[r].x0 && x < ranges[r].x1) return static_cast<int> (r);
+        return -1;
+    };
+    double above = -1e9;   // the bottom of the staff above
+    for (int si : sys.staves)
+    {
+        const auto& st = layout.staves[static_cast<size_t> (si)];
+        const double sp = st.space;
+        const double yTop = std::max (above + sp, st.top() - 14 * sp), yBottom = st.top() - 0.8 * sp;
+        above = st.bottom();
+        auto hookAt = [&] (double x, double y) {
+            for (const auto& v : page.segments)
+                if (v.vertical() && v.thickness < 0.35 * sp && std::abs (v.a.x - x) < 0.35 * sp && std::abs (v.minY() - y) < 0.35 * sp
+                    && v.maxY() - y > 0.8 * sp && v.maxY() - y < 5 * sp)
+                    return true;
+            return false;
+        };
+        auto insideStaff = [&] (double y) {
+            for (const auto& o : layout.staves)
+                if (y > o.top() - 0.3 * o.space && y < o.bottom() + 0.3 * o.space) return true;
+            return false;
+        };
+        auto throughHead = [&] (const Segment& h) {
+            for (const auto& g : page.glyphs)
+                if (headKind (g.name) != HeadKind::None && g.box.x1 > h.minX() && g.box.x0 < h.maxX()
+                    && g.box.y0 - 0.5 * sp < h.a.y && g.box.y1 + 0.5 * sp > h.a.y)
+                    return true;
+            return false;
+        };
+        for (const auto& h : page.segments)
+        {
+            if (! h.horizontal (0.005) || h.dashed || h.thickness > 0.35 * sp || h.length() < 1.5 * sp) continue;
+            const double y = (h.a.y + h.b.y) * 0.5;
+            if (y < yTop || y > yBottom || h.minX() < sys.x0 - sp || h.maxX() > sys.x1 + sp || insideStaff (y)) continue;
+            const bool leftHook = hookAt (h.minX(), y), rightHook = hookAt (h.maxX(), y);
+            // the label: the words under the line from its left end, joined
+            const Text* label = nullptr;
+            for (const auto& t : page.texts)
+                if (t.box.x0 > h.minX() - 0.5 * sp && t.box.x0 < h.minX() + 3 * sp && t.box.y0 > y - 0.6 * sp && t.box.cy() > y && t.box.y1 < y + 5 * sp
+                    && (label == nullptr || t.box.x0 < label->box.x0))
+                    label = &t;
+            std::string labelText;
+            bool labelItalic = false;
+            if (label != nullptr)
+            {
+                labelText = label->text;
+                labelItalic = label->italic;
+                for (const Text* last = label;;)
+                {
+                    const Text* next = nullptr;
+                    for (const auto& t : page.texts)
+                        if (&t != last && t.box.x0 >= last->box.x1 - 0.1 && t.box.x0 - last->box.x1 < 2 * sp && t.box.x1 < h.maxX()
+                            && std::abs (t.box.y1 - last->box.y1) < 0.4 * sp && (next == nullptr || t.box.x0 < next->box.x0))
+                            next = &t;
+                    if (next == nullptr) break;
+                    labelText += " " + next->text;
+                    last = next;
+                }
+                if (voltaNumbers (labelText, labelItalic).empty()) label = nullptr;
+            }
+            VoltaRead v;
+            v.first = barOf (h.minX() + 0.5 * sp);
+            v.last = barOf (h.maxX() - 0.5 * sp);
+            if (v.first < 0 || v.last < v.first) continue;
+            v.closed = rightHook;
+            v.toEnd = ! rightHook && h.maxX() > ranges.back().x1 - 1.5 * sp;
+            if (label != nullptr && leftHook)
+            {
+                v.number = voltaNumbers (labelText, labelItalic);
+                v.text = labelText;
+            }
+            else if (label != nullptr || leftHook || v.first != 0 || h.length() < 3 * sp || h.minX() < sys.x0 + 2 * sp || throughHead (h) || insideStaff (y))
+                continue;   // not a bracket carried on: a ledger line, a stray line
+            bool seen = false;
+            for (const auto& o : out) seen = seen || (o.first == v.first && o.last == v.last) || (v.number.empty() && o.number.empty());
+            if (std::getenv ("ANS_DEBUG_VOLTAS") != nullptr)
+                std::fprintf (stderr, "volta p%d y%.1f x%.1f-%.1f bars %d-%d of %zu (end %.1f) \"%s\" closed %d toEnd %d hookL %d\n", page.number, y, h.minX(), h.maxX(), v.first, v.last, ranges.size(), ranges.back().x1, v.number.c_str(), v.closed, v.toEnd, leftHook);
+            if (! seen) out.push_back (v);
+        }
+    }
+    return out;
+}
+
 Fraction itemDuration (const Item& it)
 {
     Fraction d = dotted (baseDuration (it.type), it.dots);
@@ -1142,6 +1285,8 @@ SystemRead PageReader::readSystem (int systemIndex, std::vector<StaffState>& sta
                 }
             }
     }
+
+    out.voltas = findVoltas (page, layout, sys, ranges);
 
     auto barOf = [&] (double x) {
         for (size_t r = 0; r < ranges.size(); ++r)
@@ -2280,6 +2425,7 @@ ReadResult readScore (const std::vector<PageInk>& pages)
     std::vector<SystemPart> known;                       // the score's parts, as first seen
     std::vector<std::vector<StaffState>> partState;      // per part, per staff
     int globalBar = 0;
+    struct OpenVolta { int bar = -1; std::string number; } openVolta, pendingVolta;   // a bracket running on past a system's end
     std::vector<Part>& parts = result.score.parts;
 
     for (const auto& page : pages)
@@ -2515,6 +2661,36 @@ ReadResult readScore (const std::vector<PageInk>& pages)
                     c.clef = read.openingClef[k];
                     m.clefs.insert (m.clefs.begin(), c);
                 }
+
+            // Voltas, on every part's barlines.
+            const int firstBar = globalBar - read.bars;
+            auto setEnding = [&] (int bar, bool left, Barline::Ending type, const std::string& number, const std::string& text) {
+                for (auto& part : parts)
+                {
+                    if (bar < 0 || static_cast<size_t> (bar) >= part.measures.size()) continue;
+                    auto& m = part.measures[static_cast<size_t> (bar)];
+                    auto& b = left ? m.left : m.right;
+                    b.ending = type; b.endingNumber = number; b.endingText = text;
+                    if (left) m.hasLeft = true;
+                }
+            };
+            for (const auto& v : read.voltas)
+            {
+                std::string number = v.number, text = v.text;
+                if (number.empty())
+                {
+                    // carries on the open bracket from the system before
+                    if (openVolta.bar < 0 || v.first != 0) continue;
+                    number = openVolta.number;
+                    setEnding (openVolta.bar, false, Barline::Ending::None, {}, {});
+                }
+                else
+                    setEnding (firstBar + v.first, true, Barline::Ending::Start, number, text);
+                setEnding (firstBar + v.last, false, v.closed ? Barline::Ending::Stop : Barline::Ending::Discontinue, number, {});
+                if (v.toEnd) { pendingVolta.bar = firstBar + v.last; pendingVolta.number = number; }
+            }
+            openVolta = pendingVolta;
+            pendingVolta = {};
         }
     }
 

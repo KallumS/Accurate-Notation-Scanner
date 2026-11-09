@@ -19,7 +19,82 @@ int Performance::barAt (double q) const
     if (barStart.size() < 2) return 0;
     const auto it = std::upper_bound (barStart.begin(), barStart.end(), q);
     const int i = static_cast<int> (it - barStart.begin()) - 1;
-    return std::clamp (i, 0, static_cast<int> (barStart.size()) - 2);
+    const int slot = std::clamp (i, 0, static_cast<int> (barStart.size()) - 2);
+    return static_cast<size_t> (slot) < barPlayed.size() ? barPlayed[static_cast<size_t> (slot)] : slot;
+}
+
+namespace
+{
+std::vector<int> endingNumbers (const std::string& s)
+{
+    std::vector<int> out;
+    int n = 0;
+    bool digits = false;
+    for (char c : s + ",")
+    {
+        if (std::isdigit (static_cast<unsigned char> (c))) { n = n * 10 + (c - '0'); digits = true; }
+        else if (digits) { out.push_back (n); n = 0; digits = false; }
+    }
+    return out;
+}
+} // namespace
+
+std::vector<int> playOrder (const Score& score)
+{
+    std::vector<int> order;
+    if (score.parts.empty()) return order;
+    const auto& ms = score.parts.front().measures;
+    const int n = static_cast<int> (ms.size());
+
+    // the ending each bar is in, by its numbers, and where that ending stops
+    std::vector<std::vector<int>> endingOf (static_cast<size_t> (n));
+    std::vector<int> endingEnd (static_cast<size_t> (n), -1);
+    for (int b = 0; b < n; ++b)
+    {
+        if (ms[static_cast<size_t> (b)].left.ending != Barline::Ending::Start) continue;
+        const auto numbers = endingNumbers (ms[static_cast<size_t> (b)].left.endingNumber);
+        int e = b;
+        while (e < n && ms[static_cast<size_t> (e)].right.ending == Barline::Ending::None
+               && (e == b || ms[static_cast<size_t> (e)].left.ending != Barline::Ending::Start))
+            ++e;
+        if (e >= n || (e > b && ms[static_cast<size_t> (e)].left.ending == Barline::Ending::Start)) e = std::max (b, e - 1);
+        for (int k = b; k <= e; ++k) { endingOf[static_cast<size_t> (k)] = numbers; endingEnd[static_cast<size_t> (k)] = e; }
+    }
+
+    int start = 0, pass = 1;
+    std::map<int, int> jumps;   // backward repeats taken, per bar
+    const size_t limit = static_cast<size_t> (n) * 10 + 10;
+    for (int b = 0; b < n && order.size() < limit;)
+    {
+        const auto& m = ms[static_cast<size_t> (b)];
+        if (m.left.repeat && b != start) { start = b; pass = 1; }
+        const auto& numbers = endingOf[static_cast<size_t> (b)];
+        if (! numbers.empty() && std::find (numbers.begin(), numbers.end(), pass) == numbers.end())
+        {
+            // not this pass's ending: skip it, unless no later ending is
+            if (b == 0 || ms[static_cast<size_t> (b)].left.ending == Barline::Ending::Start)
+            {
+                bool later = false;
+                for (int k = endingEnd[static_cast<size_t> (b)] + 1; k < n && ! endingOf[static_cast<size_t> (k)].empty(); k = endingEnd[static_cast<size_t> (k)] + 1)
+                    later = later || std::find (endingOf[static_cast<size_t> (k)].begin(), endingOf[static_cast<size_t> (k)].end(), pass) != endingOf[static_cast<size_t> (k)].end();
+                if (later) { b = endingEnd[static_cast<size_t> (b)] + 1; continue; }
+            }
+        }
+        order.push_back (b);
+        if (m.right.repeat)
+        {
+            int times = 2;
+            for (int k : numbers) times = std::max (times, k + 1);
+            if (jumps[b] + 1 < times) { ++jumps[b]; ++pass; b = start; continue; }
+            start = b + 1; pass = 1;
+        }
+        else if (! numbers.empty() && b == endingEnd[static_cast<size_t> (b)] && (b + 1 >= n || endingOf[static_cast<size_t> (b + 1)].empty()))
+        {
+            start = b + 1; pass = 1;   // past the last ending
+        }
+        ++b;
+    }
+    return order;
 }
 
 namespace
@@ -89,9 +164,11 @@ Performance perform (const Score& score)
 
     // Where each bar starts: the longest voice in any part (a pickup is short).
     const size_t bars = score.parts.front().measures.size();
+    out.barPlayed = playOrder (score);
     double t = 0;
-    for (size_t b = 0; b < bars; ++b)
+    for (int played : out.barPlayed)
     {
+        const auto b = static_cast<size_t> (played);
         out.barStart.push_back (t);
         double longest = 0;
         for (const auto& part : score.parts)
@@ -119,10 +196,12 @@ Performance perform (const Score& score)
         std::map<int, int> velocityOfStaff;   // the dynamic in force, per staff
         struct Open { size_t index; int pitch; int staff; };
         std::vector<Open> open;                // notes tied on into the next
-        for (size_t b = 0; b < part.measures.size() && b < bars; ++b)
+        for (size_t slot = 0; slot < out.barPlayed.size(); ++slot)
         {
+            const auto b = static_cast<size_t> (out.barPlayed[slot]);
+            if (b >= part.measures.size() || b >= bars) continue;
             const auto& m = part.measures[b];
-            const double barT = out.barStart[b];
+            const double barT = out.barStart[slot];
             std::vector<const Event*> events;
             for (const auto& e : m.events) events.push_back (&e);
             std::stable_sort (events.begin(), events.end(), [] (const Event* a, const Event* c) { return a->offset < c->offset; });
@@ -244,8 +323,10 @@ std::string toMidiFile (const Score& score, const Performance& perf)
     tempo += static_cast<char> (usPerQuarter & 0xff);
     conductor.push_back ({ 0, 1, meta (0x51, tempo) });
     if (! score.parts.empty())
-        for (size_t b = 0; b < score.parts.front().measures.size() && b < perf.barStart.size(); ++b)
+        for (size_t slot = 0; slot < perf.barPlayed.size() && slot < perf.barStart.size(); ++slot)
         {
+            const auto b = static_cast<size_t> (perf.barPlayed[slot]);
+            if (b >= score.parts.front().measures.size()) continue;
             const auto& m = score.parts.front().measures[b];
             if (! m.time) continue;
             int log2 = 0;
@@ -255,7 +336,7 @@ std::string toMidiFile (const Score& score, const Performance& perf)
             ts += static_cast<char> (log2);
             ts += static_cast<char> (24);
             ts += static_cast<char> (8);
-            conductor.push_back ({ tick (perf.barStart[b]), 2, meta (0x58, ts) });
+            conductor.push_back ({ tick (perf.barStart[slot]), 2, meta (0x58, ts) });
         }
     file += track (conductor);
 
