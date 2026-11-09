@@ -104,6 +104,8 @@ struct Event
     int type = 2;                  // log2 of the note value: -1 breve, 0 whole, 1 half, 2 quarter, 3 eighth...
     int dots = 0;
     Tuplet tuplet;
+    int tremolo = 0;               // tremolo strokes
+    int tremoloType = 0;           // 1 on one note, 2 first of two notes, 3 second of two
     Fraction duration;             // in quarter notes; zero for a grace note
     Fraction offset;               // from the start of the bar
     int voice = 1;                 // within its staff, 1-based

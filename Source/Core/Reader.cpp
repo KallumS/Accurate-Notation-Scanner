@@ -193,6 +193,8 @@ struct Stem
     int flags = 0;
     bool slash = false;
     int staff = -1;
+    int tremoloWith = -1;                // the other stem of a two-note tremolo
+    int tremoloStrokes = 0;
 };
 
 struct Item
@@ -218,6 +220,8 @@ struct Item
     std::vector<Note> notes;
     std::vector<int> beams;
     std::vector<std::pair<int, bool>> slurs; // number, start?
+    int tremolo = 0;                    // strokes of a two-note tremolo
+    int tremoloType = 0;                // 2 its first note, 3 its second (Event's)
 };
 
 struct TieLink { int from = -1, to = -1; bool toNextSystem = false, fromLastSystem = false; };
@@ -309,6 +313,7 @@ private:
     void findStems();
     void findBeams();
     void findFlags();
+    void findTremolos();
     void buildItems();
     void findDots();
     void findTies();
@@ -416,6 +421,7 @@ void PageReader::prepare()
     findStems();
     findBeams();
     findFlags();
+    findTremolos();
     buildItems();
     findDots();
     findTies();
@@ -631,6 +637,52 @@ void PageReader::findFlags()
     }
 }
 
+// A two-note tremolo: beam strokes standing between two stems and touching
+// neither. The two notes share the time of one: each sounds half its value.
+void PageReader::findTremolos()
+{
+    std::set<int> used;
+    for (const auto& st : stems)
+        for (const auto& level : st.levels)
+            for (int s : level) used.insert (s);
+    std::map<std::pair<int, int>, std::vector<double>> strokes;   // (left stem, right stem) -> stroke heights
+    for (size_t i = 0; i < page.segments.size(); ++i)
+    {
+        if (used.count (static_cast<int> (i))) continue;
+        const auto& s = page.segments[i];
+        const double sp = spaceNear (s.a.x, s.a.y);
+        if (s.thickness < 0.22 * sp || s.thickness > 0.85 * sp || s.length() < 0.8 * sp || s.dashed) continue;
+        if (std::abs (s.dy()) > 0.6 * std::abs (s.dx())) continue;
+        int left = -1, right = -1;
+        bool touches = false;
+        for (size_t k = 0; k < stems.size() && ! touches; ++k)
+        {
+            const auto& st = stems[k];
+            const double y = s.yAt (st.x);
+            const bool alongside = y > st.y0 - sp && y < st.y1 + sp;
+            if (! alongside) continue;
+            if (st.x > s.minX() - 0.3 * sp && st.x < s.maxX() + 0.3 * sp) { touches = true; continue; }
+            if (st.x < s.minX() && s.minX() - st.x < 3.5 * sp && (left < 0 || st.x > stems[static_cast<size_t> (left)].x)) left = static_cast<int> (k);
+            if (st.x > s.maxX() && st.x - s.maxX() < 3.5 * sp && (right < 0 || st.x < stems[static_cast<size_t> (right)].x)) right = static_cast<int> (k);
+        }
+        if (touches || left < 0 || right < 0 || stems[static_cast<size_t> (left)].staff != stems[static_cast<size_t> (right)].staff) continue;
+        // centred between them, more or less
+        const double gapL = s.minX() - stems[static_cast<size_t> (left)].x, gapR = stems[static_cast<size_t> (right)].x - s.maxX();
+        if (std::abs (gapL - gapR) > 1.0 * sp) continue;
+        auto& ys = strokes[{ left, right }];
+        const double y = (s.a.y + s.b.y) * 0.5;
+        if (std::none_of (ys.begin(), ys.end(), [&] (double o) { return std::abs (o - y) < 0.3 * sp; })) ys.push_back (y);
+    }
+    for (const auto& [pair, ys] : strokes)
+    {
+        auto& a = stems[static_cast<size_t> (pair.first)];
+        auto& b = stems[static_cast<size_t> (pair.second)];
+        if (a.tremoloWith >= 0 || b.tremoloWith >= 0 || ! a.levels.empty() || ! b.levels.empty() || ys.size() > 4) continue;
+        a.tremoloWith = pair.second; b.tremoloWith = pair.first;
+        a.tremoloStrokes = b.tremoloStrokes = static_cast<int> (ys.size());
+    }
+}
+
 void PageReader::buildItems()
 {
     headItem.assign (heads.size(), -1);
@@ -753,6 +805,18 @@ void PageReader::buildItems()
         it.small = g.size < 0.8 * 4.0 * staff.space;
         items.push_back (it);
         glyphUsed[i] = true;
+    }
+
+    // Two-note tremolos: each note sounds half its value (MusicXML's 2:1).
+    for (auto& it : items)
+    {
+        if (it.rest || it.stem < 0) continue;
+        const auto& st = stems[static_cast<size_t> (it.stem)];
+        if (st.tremoloWith < 0 || it.tuplet.active()) continue;
+        it.tuplet.actual = 2;
+        it.tuplet.normal = 1;
+        it.tremolo = st.tremoloStrokes;
+        it.tremoloType = stems[static_cast<size_t> (st.tremoloWith)].x > st.x ? 2 : 3;
     }
 }
 
@@ -2095,6 +2159,8 @@ SystemRead PageReader::readSystem (int systemIndex, std::vector<StaffState>& sta
                     e.type = it.type;
                     e.dots = it.dots;
                     e.tuplet = it.tuplet;
+                    e.tremolo = it.tremolo;
+                    e.tremoloType = it.tremoloType;
                     e.duration = it.duration;
                     e.offset = it.offset;
                     e.voice = it.voice;

@@ -352,7 +352,8 @@ std::string toMusicXml (const Score& score)
                             }
                         const bool tied = note != nullptr && (note->tieStart || note->tieStop);
                         const bool tuplet = n == 0 && e.tuplet.active() && (e.tuplet.start || e.tuplet.stop);
-                        if (tied || tuplet || ! arts.empty() || ! orns.empty() || ! techs.empty() || ! fermatas.empty() || ! slurs.empty())
+                        const bool tremolo = n == 0 && e.tremolo > 0 && e.tremoloType > 0;
+                        if (tied || tuplet || tremolo || ! arts.empty() || ! orns.empty() || ! techs.empty() || ! fermatas.empty() || ! slurs.empty())
                         {
                             w.open ("notations");
                             if (note != nullptr && note->tieStop) w.empty ("tied", { { "type", "stop" } });
@@ -374,10 +375,12 @@ std::string toMusicXml (const Score& score)
                                 for (const auto& a : arts) w.empty (a);
                                 w.close();
                             }
-                            if (! orns.empty())
+                            if (! orns.empty() || tremolo)
                             {
                                 w.open ("ornaments");
                                 for (const auto& a : orns) w.empty (a);
+                                if (tremolo)
+                                    w.leaf ("tremolo", e.tremolo, { { "type", e.tremoloType == 1 ? "single" : e.tremoloType == 2 ? "start" : "stop" } });
                                 w.close();
                             }
                             if (! techs.empty())
