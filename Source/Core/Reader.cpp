@@ -292,6 +292,7 @@ public:
     const PageLayout& layout;
 
     std::vector<int> glyphStaff;
+    std::vector<double> fullSize;        // per staff: the music font size of its ordinary notes
     std::vector<Head> heads;
     std::vector<Stem> stems;
     std::vector<int> beamSegs;
@@ -430,6 +431,25 @@ void PageReader::prepare()
 
 void PageReader::findHeads()
 {
+    // What full size is on each staff: the font size most of its noteheads
+    // have, never more than a staff's standard (four spaces to the em). A
+    // score set in a smaller music font throughout (LilyPond's fontSize)
+    // has small notes that are not grace notes.
+    fullSize.assign (layout.staves.size(), 0.0);
+    {
+        std::vector<std::map<long, int>> sizes (layout.staves.size());
+        for (size_t i = 0; i < page.glyphs.size(); ++i)
+            if (glyphStaff[i] >= 0 && headKind (page.glyphs[i].name) != HeadKind::None)
+                ++sizes[static_cast<size_t> (glyphStaff[i])][std::lround (page.glyphs[i].size * 4)];
+        for (size_t s = 0; s < layout.staves.size(); ++s)
+        {
+            const double standard = 4.0 * layout.staves[s].space;
+            int most = 0, count = 0;
+            long common = 0;
+            for (const auto& [size, n] : sizes[s]) { count += n; if (n > most) { most = n; common = size; } }
+            fullSize[s] = count >= 8 ? std::min (standard, common / 4.0) : standard;
+        }
+    }
     for (size_t i = 0; i < page.glyphs.size(); ++i)
     {
         const auto& g = page.glyphs[i];
@@ -451,7 +471,7 @@ void PageReader::findHeads()
         h.step = staff.stepAt (g.origin.y);
         h.line = static_cast<int> (std::lround (h.step));
         h.kind = kind;
-        h.small = g.size < 0.8 * 4.0 * staff.space;
+        h.small = g.size < 0.8 * fullSize[static_cast<size_t> (glyphStaff[i])];
         h.staff = glyphStaff[i];
         if (g.name.find ("noteheadX") == 0) h.shape = "x";
         else if (g.name.find ("Diamond") != std::string::npos) h.shape = "diamond";
@@ -794,7 +814,6 @@ void PageReader::buildItems()
         const auto& g = page.glyphs[i];
         const int type = restType (g.name);
         if (type == 99 || glyphStaff[i] < 0) continue;
-        const auto& staff = layout.staves[static_cast<size_t> (glyphStaff[i])];
         Item it;
         it.rest = true;
         it.glyph = static_cast<int> (i);
@@ -802,7 +821,7 @@ void PageReader::buildItems()
         it.x = g.box.x0; it.x1 = g.box.x1;
         it.y0 = g.box.y0; it.y1 = g.box.y1;
         it.type = type;
-        it.small = g.size < 0.8 * 4.0 * staff.space;
+        it.small = g.size < 0.8 * fullSize[static_cast<size_t> (glyphStaff[i])];
         items.push_back (it);
         glyphUsed[i] = true;
     }

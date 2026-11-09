@@ -134,8 +134,24 @@ What the Mutopia run changed in the reader:
 | A whole note joins the voice it sounds with | organ chorales' long notes no longer overflow the lower voice |
 | Two-note tremolos (MuseScore) | the 115 Lieder with tremolos 86.8% → 89.4% |
 
-Large orchestral scores are the weak spot: many staves, transposing
-instruments, divided parts, cue notes. Tremolos in LilyPond's drawing
+Large scores look worse than they are. The comparison lines up the whole
+score at once and may shift the whole piece by one interval; LilyPond's
+MIDI plays a clarinet in B♭ or a horn in F at the pitch it sounds, the page
+shows the pitch it is written at, so one transposing part spoils every
+chord it plays in. Compared part by part (each MIDI track against the read
+part it matches, allowing that part's own transposition), the 79 scores of
+3,000 notes or more are **78.0%** right, not 57.2% (with transposing
+instruments 39.7% → 72.0% per piece; without, 73.9% → 86.7%). In the Mozart
+Requiem's *Dies irae* every part matches the MIDI note for note; the
+whole-score figure was 4.3%.
+
+A string quartet set in a smaller music font throughout (LilyPond's
+`fontSize = #-2`) was read as all grace notes (2.4%); small now means small
+next to the staff's ordinary notes, not next to the staff (73.4%; seven
+Mutopia pieces had this).
+
+What remains in large scores: parts mixed up where empty staves are hidden
+(a trumpet's notes landing in the tenor), divided parts, cue notes. Tremolos in LilyPond's drawing
 (slashes across a stem) and D.C./D.S. jumps are not read yet.
 
 ## Not yet tested
