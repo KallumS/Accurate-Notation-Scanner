@@ -21,7 +21,7 @@ warnings.filterwarnings("ignore")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-SCANNER = os.path.join(ROOT, "build-core", "notation-scan")
+SCANNER = os.environ.get("ANS_SCANNER", os.path.join(ROOT, "build-core", "notation-scan"))
 SCORE_EXT = (".mscx", ".mscz", ".mxl", ".musicxml", ".xml", ".krn", ".abc")
 
 
@@ -58,13 +58,24 @@ def openable_copy(f, workdir):
     """MuseScore 3.2 refuses files saved by 3.5 and later (format 3.02),
     though the format barely changed. A copy marked 3.01 opens; whatever it
     does not understand is skipped - in the PDF and the truth alike."""
-    if not f.endswith(".mscx"):
+    if f.endswith(".mscz"):
+        import zipfile
+        try:
+            with zipfile.ZipFile(f) as z:
+                inner = [n for n in z.namelist() if n.endswith(".mscx")]
+                if not inner:
+                    return f
+                text = z.read(inner[0]).decode("utf-8", errors="replace")
+        except Exception:
+            return f
+    elif f.endswith(".mscx"):
+        with open(f, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    else:
         return f
-    with open(f, encoding="utf-8", errors="replace") as fh:
-        text = fh.read()
-    if '<museScore version="3.02">' not in text:
+    if '<museScore version="3.02">' not in text and f.endswith(".mscx"):
         return f
-    dst = os.path.join(workdir, os.path.basename(f))
+    dst = os.path.join(workdir, os.path.splitext(os.path.basename(f))[0] + ".mscx")
     with open(dst, "w", encoding="utf-8") as fh:
         fh.write(text.replace('<museScore version="3.02">', '<museScore version="3.01">', 1))
     return dst
